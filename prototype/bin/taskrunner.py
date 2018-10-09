@@ -34,7 +34,7 @@ class TaskRunner(object):
     def __init__(
             self,
             test,
-            participants,
+            nparticipants,
             a,
             z,
             debug=False
@@ -55,18 +55,19 @@ class TaskRunner(object):
         self.diags = self.results["diags"]
 
         # Make sure we have sufficient pSchedulers to cover the participants
-        if len(participants) == 2 and "pscheduler" not in z:
+        if (nparticipants == 2) and ("pscheduler" not in z):
             # TODO: Assert that Z has a host?
-            #self.__diag("No pScheduler for or on %s." % (z["host"]))
+            self.__diag("No pScheduler for or on %s." % (z["host"]))
             return
 
-        self.results["participants"] = [ a["host"], z["host"] ][0:len(participants)]
 
         # Fill in the test's blanks and construct a task spec
 
         test = copy.deepcopy(test)
         test = pscheduler.json_substitute(test, "__A__", a["pscheduler"])
-        test = pscheduler.json_substitute(test, "__Z__", z.get("pscheduler", z["host"]))
+
+        z_end = z["host"] if nparticipants == 1 else z.get("pscheduler", z["host"])
+        test = pscheduler.json_substitute(test, "__Z__", z_end)
      
         task = {
             "schema": 1,
@@ -217,9 +218,9 @@ if __name__ == "__main__":
         "host": "dev6"
     }
 
-    participants = [ "dev7", "dev6" ]
+    nparticipants = 2
 
 
 
-    r = TaskRunner(test, participants, a, z, debug=True)
+    r = TaskRunner(test, nparticipants, a, z, debug=True)
     print pscheduler.json_dump(r.result(), pretty=True)
