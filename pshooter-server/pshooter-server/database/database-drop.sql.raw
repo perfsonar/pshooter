@@ -1,0 +1,22 @@
+--
+-- Database drop
+--
+
+\c postgres
+
+-- Force disconnection of any clients other than us using this
+-- database.
+
+DO $$
+BEGIN
+    PERFORM pg_terminate_backend(pg_stat_activity.pid)
+    FROM pg_stat_activity
+    WHERE
+        pg_stat_activity.datname = '__DATABASE__'
+        AND pid <> pg_backend_pid();
+END;
+$$ LANGUAGE plpgsql;
+
+
+DROP DATABASE IF EXISTS __DATABASE__;
+DROP ROLE IF EXISTS __ROLE__;

@@ -1,0 +1,188 @@
+#!/usr/bin/python
+#
+# Execute pShooter measurements
+#
+
+import daemon
+import datetime
+import errno
+import logging
+import multiprocessing
+import optparse
+import pscheduler
+import psycopg2
+import psycopg2.extensions
+import psycopg2.pool
+import select
+import signal
+import socket
+import threading
+import time
+
+
+
+pscheduler.set_graceful_exit()
+
+# Gargle the arguments
+
+opt_parser = optparse.OptionParser()
+
+# Daemon-related options
+
+opt_parser.add_option("--daemon",
+                      help="Daemonize",
+                      action="store_true",
+                      dest="daemon", default=False)
+opt_parser.add_option("--pid-file",
+                      help="Location of PID file",
+                      action="store", type="string", dest="pidfile",
+                      default=None)
+
+# Program options
+
+opt_parser.add_option("-d", "--dsn",
+                      help="Database connection string",
+                      action="store", type="string", dest="dsn",
+                      default="")
+opt_parser.add_option("-m", "--max-parallel",
+                      help="Maximum concurrent runs",
+                      action="store", type="int", dest="max_parallel",
+                      default=15)
+opt_parser.add_option("-r", "--refresh",
+                      help="Forced refresh interval (ISO8601)",
+                      action="store", type="string", dest="refresh",
+                      default="PT1M")
+opt_parser.add_option("--terse-logging",
+                      help="Don't log run details",
+                      action="store_true",
+                      dest="terse",
+                      default=False)
+
+
+
+opt_parser.add_option("--verbose", action="store_true", dest="verbose", default=False)
+opt_parser.add_option("--debug", action="store_true", dest="debug", default=False)
+
+(options, args) = opt_parser.parse_args()
+
+refresh = pscheduler.iso8601_as_timedelta(options.refresh)
+if refresh is None:
+    opt_parser.error('Invalid refresh interval "' + options.refresh + '"')
+if pscheduler.timedelta_as_seconds(refresh) == 0:
+    opt_parser.error("Refresh interval must be calculable as seconds.")
+
+
+log = pscheduler.Log(
+    verbose=options.verbose,
+    debug=options.debug,
+    factility=pscheduler.local5
+)
+
+dsn = pscheduler.string_from_file(options.dsn)
+
+log_details = not options.terse
+
+
+# TODO: Worker Here
+
+
+#
+# Main Program
+#
+
+
+def main_program():
+
+    log.debug("Begin main")
+
+    db = pscheduler.pg_connection(dsn)
+    log.debug("Connected to DB")
+
+    # Pool of connections for use by the threads.  Note that these
+    # connections do not have autocommit, so anything using them will
+    # need to do its own commits.
+
+    dbpool = psycopg2.pool.ThreadedConnectionPool(
+        int(options.max_parallel/100),   # Minimum connections
+        options.max_parallel,            # Maximum connections
+        dsn="%s application_name=pshooter-pool" % (dsn))
+
+    # Listen for notifications.
+
+    for listen in ["task_new"]:
+        log.debug("Listening for notification %s" % (listen))
+        with db.cursor() as cursor:
+            cursor.execute("LISTEN %s" % (listen))
+
+    # Prime this for the first run
+    wait_time = datetime.timedelta()
+
+    while True:
+
+        log.debug("Next run or check in %s", wait_time)
+        if not pscheduler.timedelta_is_zero(wait_time):
+
+            # Wait for a notification or the wait time to elapse.  Eat all
+            # notifications as a group; we only care that we were notified.
+
+            # TODO: This try needs to be brought to the other programs.
+            # Better, make it a function in db.py.
+
+            try:
+                if pscheduler.polled_select(
+                        [db],[],[],
+                        pscheduler.timedelta_as_seconds(wait_time)) \
+                    != ([],[],[]):
+                    # Notified
+                    db.poll()
+                    del db.notifies[:]
+                    log.debug("Notified.")
+
+            except select.error as ex:
+
+                err_no, message = ex
+                if err_no != errno.EINTR:
+                    log.exception()
+                    raise ex
+
+
+        with db.cursor() as cursor:
+
+            # Operate only on runs that are scheduled to start before the next
+            # forced refresh.
+            # TODO: Error check this.
+            cursor.execute("""
+                       SELECT 12345
+                   """, []);
+
+
+            wait_time = refresh
+
+            already_running = 0
+            run_ids = []
+            run_workers = []
+            for row in cursor:
+
+                # TODO: Do something for each row.
+                pass
+
+        if already_running > 0:
+            log.debug("Skipped %d already-running runs", already_running)
+
+        if not run_workers:
+            log.debug("No workers to run.")
+            wait_time = refresh
+            continue
+
+
+    # Not that this will ever be reached...
+    db.close()
+
+
+
+if options.daemon:
+    pidfile = pscheduler.PidFile(options.pidfile)
+    with daemon.DaemonContext(pidfile=pidfile):
+        pscheduler.safe_run(lambda: main_program())
+else:
+    pscheduler.safe_run(lambda: main_program())
