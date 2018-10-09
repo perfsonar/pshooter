@@ -1,0 +1,17 @@
+{
+    "arpa": {
+        "in-addr": {
+            "30.26.164.137": {
+                "PTR": "hpr-ucsd-40ge-2--lax-hpr.cenic.net."
+            }
+        },
+        "ip6": {}
+    },
+    "net": {
+        "cenic": {
+	    "_ipv4._perfsonar.hpr-ucsd-40ge-2--lax-hpr": {
+                "TXT": "{\"pscheduler\": \"ps-lax-10g.cenic.net\"}"
+	    }
+	}
+    }
+}

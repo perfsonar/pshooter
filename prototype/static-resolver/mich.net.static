@@ -1,0 +1,17 @@
+{
+    "arpa": {
+        "in-addr": {
+            "73.122.200.192": {
+                "PTR": "xe-11-0-1x241.sfld-cor-123net.mich.net."
+            }
+        },
+        "ip6": {}
+    },
+    "net": {
+        "mich": {
+	    "_ipv4._perfsonar.xe-11-0-1x241.sfld-cor-123net": {
+                "TXT": "{\"pscheduler\": \"nmon-sfpop.mich.net\"}"
+	    }
+	}
+    }
+}

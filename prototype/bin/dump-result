@@ -1,0 +1,92 @@
+#!/usr/bin/python
+
+import ipaddress
+import optparse
+import pscheduler
+
+from hybridresolver import *
+
+
+#
+# Gargle the arguments
+#
+
+usage = "Usage: %prog [options]"
+opt_parser = optparse.OptionParser(usage = usage)
+opt_parser.disable_interspersed_args()
+
+# GENERAL OPTIONS
+
+opt_parser.add_option("--resolver",
+                      help="Use the specified static resolver configuration to augment DNS",
+                      default=None,
+                      action="store", type="string",
+                      dest="resolver")
+
+(options, remaining_args) = opt_parser.parse_args()
+
+if len(remaining_args) != 0:
+    opt_parser.print_usage()
+    pscheduler.fail()
+
+try:
+    results = pscheduler.json_load()
+except ValueError as ex:
+    pscheduler.fail(str(ex))
+
+
+resolver = HybridResolver(options.resolver)
+
+for result in results:
+
+    # TODO: Remove this.  Don't really need it.
+    # a_left = result["hosts"]["a"]["pscheduler"]
+    # a_right = result["hosts"]["a"]["host"]
+    # a_side = "{0} for {1}".format(a_left, a_right) if a_left != a_right else a_left
+
+    try:
+        z_right = result["hosts"]["z"]["host"]
+    except KeyError:
+        # TODO: This isn't really what we want.
+        z_right = result["hosts"]["z"]["diags"]
+
+    try:
+        addr = ipaddress.ip_address(z_right)
+        if resolver is not None:
+            z_fqdn = resolver(addr.reverse_pointer, "PTR")
+            if z_fqdn is not None:
+                z_right = z_fqdn
+    except ValueError:
+        # Leave z_right alone if it doesn't look reverse-resolvabe
+        pass
+
+    if "pscheduler" in result["hosts"]["z"]:
+        z_left = result["hosts"]["z"]["pscheduler"]
+        z_side = "Test to  {0}\n     for {1}".format(z_left, z_right)
+    else:
+        z_side = "Test to  {0}".format(z_right)
+
+    print z_side
+    print
+
+
+    try:
+        json_result = result["results"]["application/json"]
+    except KeyError:
+        if result["diags"]:
+            message = "\n".join(result["diags"])
+        else:
+            message = "No result."
+        print pscheduler.indent(message)
+        print
+        continue
+
+    try:
+        if json_result["succeeded"]:
+            print pscheduler.indent(result["results"]["text/plain"])
+        else:
+            print "FAILED.  TODO: DUMP DIAGS"
+    except KeyError:
+        print "Test failed:"
+        print pscheduler.indent("\n".join(result["diags"]))
+    print

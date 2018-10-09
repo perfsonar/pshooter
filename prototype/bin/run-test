@@ -1,0 +1,290 @@
+#!/usr/bin/python
+
+import copy
+import ipaddress
+import sys
+
+from parallelrun import *
+from hybridresolver import *
+from taskrunner import *
+
+
+def __pscheduler_at(host, diags=None):
+
+    (has_ps, reason) = pscheduler.api_ping(host)
+
+    diag_list = []
+    if diags is not None:
+        diag_list.append(diags)
+
+    result = {
+        "schema": 1,
+        "host": host
+    }
+    if has_ps:
+        result["pscheduler"] = host
+        diag_list.append("Found pScheduler on host directly.")
+    else:
+        diag_list.append(reason)
+
+    result["diags"] = ";  ".join(diag_list)
+
+    return result
+
+
+
+def __resolve_from_family(family_record_type, hostname, resolver, api_check):
+
+    # Try to resolve family-specific and non-family-specific records.
+
+    for record_type in [ family_record_type, None ]:
+
+        ps_fqdn = "{0}_perfsonar.{1}".format(
+            "" if record_type is None else "_ipv{0}.".format(record_type),
+            hostname
+        )
+
+        txt = resolver(ps_fqdn, "TXT")
+
+        #print "FQ", ps_fqdn, " -> ", txt
+
+        # If there's no TXT record, then see if pScheduler is running
+        # on the original host as a last-ditch effort.  This doesn't
+        # do much for most hosts along a route but might help catch
+        # perfSONAR nodes at the very end, enabling two-participant
+        # tests.
+
+        if txt is None:
+            return __pscheduler_at(hostname, "No TXT record for %s" % (ps_fqdn))
+
+        txt_json = None
+        redirects = 0
+
+        while redirects < 5:
+
+            try:
+                txt_json = pscheduler.json_load(txt)
+            except ValueError:
+                # If it doesn't look like JSON, do another last-ditch
+                # attempt at the address.
+                return __pscheduler_at(hostname, "TXT record for %s contains invalid JSON" % (ps_fqdn))
+
+            if "href" not in txt_json:
+                # No href means we have the final version
+                break
+
+            # Handle a redirect
+
+            redirects += 1
+            try:
+                (status, txt_json) = pscheduler.url_get(txt_json["href"], throw=False)
+            except ValueError:
+                status = 0
+            if status != 200:
+                # Nothing else we can do.
+                return __pscheduler_at(hostname, "Failed to fetch %s: %d: %s" % (txt_json["href"], status, txt_json))
+
+            break
+
+        if "href" in txt_json:
+            # Too many redirects.  Last-ditch it.
+            return __pscheduler_at(hostname, "Too many redirects for %s" % (ps_fqdn))
+
+        # TODO: Validate the contents of the record
+
+        txt_json["host"] = hostname
+
+        if api_check:
+
+            (has_ps, reason) = pscheduler.api_ping(txt_json["pscheduler"])
+            if has_ps:
+                return txt_json
+            else:
+                return __pscheduler_at(hostname, "%s: %s" % (txt_json["pscheduler"], reason))
+
+        return txt_json
+
+
+
+def __resolve_pscheduler_node(args):
+
+    """
+    Find the pScheduler information for a host
+    """
+
+    (host, resolver, api_check) = args
+
+    # TODO: Complain if this fails?
+    if not isinstance(host, unicode):
+        host = unicode(host, "utf-8")
+    addr = ipaddress.ip_address(host)
+
+    if isinstance(addr, ipaddress.IPv4Address):
+        family_record_type = "4"
+    elif isinstance(addr, ipaddress.IPv6Address):
+        family_record_type = "6"
+    else:
+        raise ValueError("Address %s is not IPv4 or IPv6" % (host))
+
+    # TODO: Assert that the resolver is a Resolver instance (once we have that built)
+    assert isinstance(api_check, bool), "Invalid api_check; must be boolean."
+
+
+    # Reverse-resolve the address
+
+    fqdn = resolver(addr.reverse_pointer, "PTR")
+    if fqdn is None:
+        # There's no reverse mapping, try for pScheduler on the host
+        # directly as a last resort.
+        return __pscheduler_at(host, "No PTR record for %s" % (host))
+
+    # Go through ever-shorter versions of the FQDN until something resolves.
+
+    ps_host_parts = fqdn.split(".")
+
+    while ps_host_parts and ps_host_parts[0]:
+        search = ".".join(ps_host_parts)
+        #print "Searching", search
+        resolve_result = __resolve_from_family(
+            family_record_type, search, resolver, api_check
+        )
+
+        if "pscheduler" in resolve_result:
+            #print "FOUND: ", resolve_result
+            # The returned host may be chopped
+            resolve_result["host"] = fqdn
+            return resolve_result
+
+        del ps_host_parts[0]
+
+    # Nothing resolved means nothing found.
+
+    return {
+        "schema": 1,
+        "diags": "No pScheduler found",
+        "host": fqdn
+    }
+
+
+
+
+
+
+
+
+def run_test(data, resolver):
+
+    # Identify pScheduler nodes for all hops
+
+    hops = data["path"]
+    # TODO: Path must have at least two hops.
+    assert len(hops) > 1, "Path must have at least two hops."
+
+    args = [ (host, resolver, False) for host in hops ]
+    nodes = parallel_run(__resolve_pscheduler_node, args)
+
+    a = nodes.pop(0)
+
+    # For now, require that the first node have pScheduler.
+    # TODO: Later, see if it's worth finding the first hop with a pS
+    # node and going from there.
+
+    if "pscheduler" not in a:
+        # TODO: Fail better.
+        assert False, "First hop must have perfSONAR: %s" % (a.get("diags", "Unknown error"))
+
+    # Assemble a list of the tests to run.
+    # (Test Spec, A, Z, Error Message)
+
+    # If the test spec is None, the test is considered un-runnable for
+    # the reason in the error message.
+
+    tests = []
+
+
+    # Assemble a prototype of the test to be run and ask the first hop
+    # (which will be the lead on all of the tests) whether or not the
+    # test is valid and for a participant list.  Note that the
+    # underscores aren't valid hostnames for DNS.
+
+    prototype = copy.copy(data["test"])
+    # TODO: Can't use generic placeholders like "host-a" while the
+    # participants methods still have the BWCTLBC hack in place.
+    # Don't use IPs here since you can't assume what stack(s) a host
+    # will be running.
+    prototype = pscheduler.json_substitute(prototype, "__A__", "localhost")
+    prototype = pscheduler.json_substitute(prototype, "__Z__", "localhost")
+
+    prototype_spec_text = pscheduler.json_dump(prototype["spec"])
+
+
+    # If there's a port tagged onto the host, split it out before
+    # formatting the URL.
+
+    a_parts = a["pscheduler"].split(":")
+    if len(a_parts) == 1:
+        a_parts.append(None)
+
+    test_url = pscheduler.api_url(
+        host=a_parts[0],
+        port=a_parts[1],
+        path="/tests/%s" % (prototype["type"]))
+
+    # Validate the spec
+
+    (status, is_valid) = pscheduler.url_get(
+        test_url + "/spec/is-valid",
+        params={ "spec": prototype_spec_text },
+        throw=False
+        )
+
+    if status == 404:
+        # TODO: Fail better
+        assert False, "Can't find test %s on %s" % (
+            prototype["type"], a["pscheduler"])
+
+    if status != 200:
+        # TODO: Fail better
+        assert False, "Unable to validate spec: %s" % (is_valid)
+
+    if not is_valid["valid"]:
+        # TODO: Fail better
+        assert False, "Spec is not valid: %s" % (
+            is_valid.get("error", "Unspecified error"))
+
+    # Get the participants
+
+    (status, participants) = pscheduler.url_get(
+        test_url + "/participants",
+        params={ "spec": prototype_spec_text },
+        throw=False
+        )
+
+    if status != 200:
+        # TODO: Fail better
+        assert False, "Unable to fetch participants: %s" % (participants)
+
+
+    runners = []
+    for z in nodes:
+        # TODO: Need to catch and log exceptions.
+        runners.append(TaskRunner(data["test"], participants, a, z, debug=True))
+
+    results = []
+    for runner in runners:
+        result = runner.result()
+        results.append(result)
+
+    return results
+
+if __name__ == "__main__":
+
+    test_file = sys.argv[1]
+    zone_file = sys.argv[2]
+
+    with open(test_file, "r") as datafile:
+        data = pscheduler.json_load(datafile)
+
+    resolver = HybridResolver(zone_file)
+
+    print pscheduler.json_dump(run_test(data, resolver), pretty=True)

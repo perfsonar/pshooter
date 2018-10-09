@@ -1,0 +1,17 @@
+{
+    "arpa": {
+        "in-addr": {
+            "132.181.124.209": {
+                "PTR": "ae0--4002.icar-sttl1-1.infra.pnw-gigapop.net."
+            }
+        },
+        "ip6": {}
+    },
+    "net": {
+        "pnw-gigapop": {
+	    "_ipv4._perfsonar.ae0--4002.icar-sttl1-1.infra": {
+                "TXT": "{\"pscheduler\": \"web100-mgmt.infra.pnw-gigapop.net\"}"
+	    }
+	}
+    }
+}
