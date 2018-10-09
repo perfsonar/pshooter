@@ -1,7 +1,7 @@
 {
-    "#": "This is the result of a pScheduler 'trace' test that can be converted"
+    "#": "This is the result of a pScheduler 'trace' test that can be converted ",
     "#": "into a path list by passing it through the following jq script (remove",
-    "#": "the backslashes):",
+    "#": "the backslashes):                                                     ",
     "#": "[ .\"result-merged\".paths[0] | .[] | if .ip then .ip else empty end ]",
 
     "paths": [
