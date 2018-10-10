@@ -1,0 +1,41 @@
+#
+# Vagrant Configuration for pShooter Demo
+#
+
+Vagrant.configure("2") do |config|
+
+  config.vm.box = "centos/7"
+
+  config.vm.provider "virtualbox" do |vb|  
+    vb.cpus = 4
+    vb.memory = 4096
+  end
+
+  config.vm.provision "shell", inline: <<-SHELL
+
+    # Basic setup
+
+    sudo yum -y update
+    sudo yum -y install \
+        epel-release \
+        http://software.internet2.edu/rpms/el7/x86_64/main/RPMS/perfSONAR-repo-0.8-1.noarch.rpm
+    sudo yum clean all
+
+    # pScheduler and other things we like to have
+
+    sudo yum -y install \
+        pscheduler-bundle-full \
+        emacs-nox \
+        git
+
+    # Demo code, left in the home directory.
+
+    sudo -u vagrant git clone https://github.com/mfeit-internet2/pshooter.git
+
+  SHELL
+
+end
+
+
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
