@@ -39,11 +39,6 @@ resolver = HybridResolver(options.resolver)
 
 for result in results:
 
-    # TODO: Remove this.  Don't really need it.
-    # a_left = result["hosts"]["a"]["pscheduler"]
-    # a_right = result["hosts"]["a"]["host"]
-    # a_side = "{0} for {1}".format(a_left, a_right) if a_left != a_right else a_left
-
     try:
         z_right = result["hosts"]["z"]["host"]
     except KeyError:
@@ -60,9 +55,24 @@ for result in results:
         # Leave z_right alone if it doesn't look reverse-resolvabe
         pass
 
+    # How we format the heading depends on whether or not it was a
+    # one- or two-participant test and whether or not we think there
+    # was supposed to be a pScheduler at the other end.
+
+    # TODO: This doesn't work accurately if there was no task.
+    try:
+        multi_part = result["nparticipants"] > 1
+    except KeyError:
+        multi_part = False
+
+    try:
+        z_dest = result["hosts"]["z"]["pscheduler" if multi_part else "host"]
+    except KeyError:
+        z_dest = result["hosts"]["z"]["host"]
     if "pscheduler" in result["hosts"]["z"]:
-        z_left = result["hosts"]["z"]["pscheduler"]
-        z_side = "Test to  {0}\n     for {1}".format(z_left, z_right)
+        z_side = "Test to  {0}".format(z_dest)
+        if multi_part:
+            z_side = z_side + "\n     for {0}".format(z_right)
     else:
         z_side = "Test to  {0}".format(z_right)
 

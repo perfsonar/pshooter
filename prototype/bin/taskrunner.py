@@ -34,7 +34,7 @@ class TaskRunner(object):
     def __init__(
             self,
             test,
-            participants,
+            nparticipants,
             a,
             z,
             debug=False
@@ -50,24 +50,26 @@ class TaskRunner(object):
                 "a": a,
                 "z": z
             },
+            "nparticipants": nparticipants,
             "diags": []
         }
         self.diags = self.results["diags"]
 
         # Make sure we have sufficient pSchedulers to cover the participants
-        if len(participants) == 2 and "pscheduler" not in z:
+        if (nparticipants == 2) and ("pscheduler" not in z):
             # TODO: Assert that Z has a host?
-            #self.__diag("No pScheduler for or on %s." % (z["host"]))
+            self.__diag("No pScheduler for or on %s." % (z["host"]))
             return
 
-        self.results["participants"] = [ a["host"], z["host"] ][0:len(participants)]
 
         # Fill in the test's blanks and construct a task spec
 
         test = copy.deepcopy(test)
         test = pscheduler.json_substitute(test, "__A__", a["pscheduler"])
-        test = pscheduler.json_substitute(test, "__Z__", z.get("pscheduler", z["host"]))
-     
+
+        z_end = z["host"] if nparticipants == 1 else z.get("pscheduler", z["host"])
+        test = pscheduler.json_substitute(test, "__Z__", z_end)
+
         task = {
             "schema": 1,
             "test": test,
@@ -82,18 +84,20 @@ class TaskRunner(object):
 
         task_post = pscheduler.api_url(host=a["pscheduler"], path="/tasks")
 
-        status, task_url = pscheduler.url_post(task_post,
+        status, task_href = pscheduler.url_post(task_post,
                                                data=pscheduler.json_dump(task),
                                                throw=False)
         if status != 200:
-            self.__diag("Unable to post task: %s" % (task_url))
+            self.__diag("Unable to post task: %s" % (task_href))
             return
 
-        self.__debug("Posted task %s" % (task_url))
+        self.__debug("Posted task %s" % (task_href))
+
+        self.task_href = task_href
 
         # Get the task from the server with full details
 
-        status, task_data = pscheduler.url_get(task_url,
+        status, task_data = pscheduler.url_get(task_href,
                                                params={"detail": True},
                                                throw=False)
         if status != 200:
@@ -174,6 +178,19 @@ class TaskRunner(object):
             self.results["results"][fmt] = result
 
 
+        # Grab a final copy of the task and its details for posterity
+
+        status, task_detail = pscheduler.url_get(self.task_href,
+                                               params={"detail": True},
+                                               throw=False)
+        if status != 200:
+            self.__diag("Unable to get detailed task data: %s" % (task_data))
+            return
+
+        self.results["task"] = task_detail
+
+
+
 
 
     def run(self):
@@ -217,9 +234,9 @@ if __name__ == "__main__":
         "host": "dev6"
     }
 
-    participants = [ "dev7", "dev6" ]
+    nparticipants = 2
 
 
 
-    r = TaskRunner(test, participants, a, z, debug=True)
+    r = TaskRunner(test, nparticipants, a, z, debug=True)
     print pscheduler.json_dump(r.result(), pretty=True)

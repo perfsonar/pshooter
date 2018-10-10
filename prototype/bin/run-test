@@ -268,7 +268,10 @@ def run_test(data, resolver):
     runners = []
     for z in nodes:
         # TODO: Need to catch and log exceptions.
-        runners.append(TaskRunner(data["test"], participants, a, z, debug=True))
+        runners.append(TaskRunner(data["test"],
+                                  len(participants["participants"]),
+                                  a, z,
+                                  debug=True))
 
     results = []
     for runner in runners:
