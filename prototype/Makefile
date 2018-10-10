@@ -43,6 +43,7 @@ $(TEST_FILE): $(TRACE_FILE) $(TEST_TEMPLATE)
 	jq -s '{ "path": [ .[0].paths[0] | .[] | .ip // empty ], "test": .[1] }' \
 	$(TRACE_FILE) $(TEST_TEMPLATE) \
 	| jq '.path = [ "127.0.0.1" ] + .path' \
+	| jq 'del(.test["#"])' \
 	> $@
 TO_CLEAN += $(TEST_FILE)
 
