@@ -9,10 +9,11 @@
 
 ## Preparation
 
- 1 Clone this Git repository
- 1 `cd pshooter/prototype`
- 1 `vagrant up`
- 1 `vagrant ssh`
+ * Clone this Git repository
+ * `cd pshooter/prototype`
+ * `vagrant up`
+ * `vagrant ssh`
+ * `cd pshooter/prototype`
 
 
 ## Prototype Directories
