@@ -50,6 +50,7 @@ class TaskRunner(object):
                 "a": a,
                 "z": z
             },
+            "nparticipants": nparticipants,
             "diags": []
         }
         self.diags = self.results["diags"]
@@ -68,7 +69,7 @@ class TaskRunner(object):
 
         z_end = z["host"] if nparticipants == 1 else z.get("pscheduler", z["host"])
         test = pscheduler.json_substitute(test, "__Z__", z_end)
-     
+
         task = {
             "schema": 1,
             "test": test,
@@ -83,18 +84,20 @@ class TaskRunner(object):
 
         task_post = pscheduler.api_url(host=a["pscheduler"], path="/tasks")
 
-        status, task_url = pscheduler.url_post(task_post,
+        status, task_href = pscheduler.url_post(task_post,
                                                data=pscheduler.json_dump(task),
                                                throw=False)
         if status != 200:
-            self.__diag("Unable to post task: %s" % (task_url))
+            self.__diag("Unable to post task: %s" % (task_href))
             return
 
-        self.__debug("Posted task %s" % (task_url))
+        self.__debug("Posted task %s" % (task_href))
+
+        self.task_href = task_href
 
         # Get the task from the server with full details
 
-        status, task_data = pscheduler.url_get(task_url,
+        status, task_data = pscheduler.url_get(task_href,
                                                params={"detail": True},
                                                throw=False)
         if status != 200:
@@ -173,6 +176,19 @@ class TaskRunner(object):
                 return
 
             self.results["results"][fmt] = result
+
+
+        # Grab a final copy of the task and its details for posterity
+
+        status, task_detail = pscheduler.url_get(self.task_href,
+                                               params={"detail": True},
+                                               throw=False)
+        if status != 200:
+            self.__diag("Unable to get detailed task data: %s" % (task_data))
+            return
+
+        self.results["task"] = task_detail
+
 
 
 
