@@ -17,8 +17,10 @@ FILES=\
 	table_version \
 	\
 	configurables \
-	run_state \
+	task_state \
 	task \
+	\
+	maintain \
 	\
 	postamble
 

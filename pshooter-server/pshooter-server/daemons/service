@@ -3,6 +3,8 @@
 # Execute pShooter measurements
 #
 
+# TODO: Remove unused imports
+import collections
 import daemon
 import datetime
 import errno
@@ -13,12 +15,12 @@ import pscheduler
 import psycopg2
 import psycopg2.extensions
 import psycopg2.pool
+import Queue
 import select
 import signal
 import socket
 import threading
 import time
-
 
 
 pscheduler.set_graceful_exit()
@@ -40,50 +42,287 @@ opt_parser.add_option("--pid-file",
 
 # Program options
 
-opt_parser.add_option("-d", "--dsn",
+opt_parser.add_option("--dsn",
                       help="Database connection string",
                       action="store", type="string", dest="dsn",
                       default="")
-opt_parser.add_option("-m", "--max-parallel",
-                      help="Maximum concurrent runs",
+opt_parser.add_option("--max-parallel",
+                      help="Maximum concurrent tasks",
                       action="store", type="int", dest="max_parallel",
-                      default=15)
-opt_parser.add_option("-r", "--refresh",
+                      default=20)
+opt_parser.add_option("--refresh",
                       help="Forced refresh interval (ISO8601)",
                       action="store", type="string", dest="refresh",
                       default="PT1M")
-opt_parser.add_option("--terse-logging",
-                      help="Don't log run details",
-                      action="store_true",
-                      dest="terse",
-                      default=False)
+
+opt_parser.add_option("--maintenance-interval",
+                      help="Minimum interval between internal maintenances (ISO8601)",
+                      action="store", type="string", dest="maintenance_interval",
+                      default="PT5M")
+
+opt_parser.add_option("--callback-interval",
+                      help="Time between notification callback attempts (ISO8601)",
+                      action="store", type="string", dest="callback_interval",
+                      default="PT15S")
+opt_parser.add_option("--callback-attempts",
+                      help="Times to attempt a notification callback before giving up",
+                      action="store", type="int", dest="callback_attempts",
+                      default=20)
 
 
 
 opt_parser.add_option("--verbose", action="store_true", dest="verbose", default=False)
 opt_parser.add_option("--debug", action="store_true", dest="debug", default=False)
+opt_parser.add_option("--debug-updater", action="store_true", dest="debug_updater", default=False)
 
 (options, args) = opt_parser.parse_args()
 
-refresh = pscheduler.iso8601_as_timedelta(options.refresh)
-if refresh is None:
+max_parallel = options.max_parallel
+if max_parallel < 1:
+    opt_parser.error("Maximum parallel tasks must be at least 1.")
+
+try:
+    refresh = pscheduler.iso8601_as_timedelta(options.refresh)
+except ValueError:
     opt_parser.error('Invalid refresh interval "' + options.refresh + '"')
-if pscheduler.timedelta_as_seconds(refresh) == 0:
-    opt_parser.error("Refresh interval must be calculable as seconds.")
+
+try:
+    maintenance_interval = pscheduler.iso8601_as_timedelta(options.maintenance_interval)
+except ValueError:
+    opt_parser.error('Invalid maintenance interval "' + options.maintenance_interval + '"')
+
+try:
+    callback_interval = pscheduler.timedelta_as_seconds(
+        pscheduler.iso8601_as_timedelta(options.callback_interval)
+    )
+except ValueError:
+    opt_parser.error('Invalid callback interval "' + options.callback_interval + '"')
+
+callback_attempts = options.callback_attempts
+if callback_attempts < 1:
+    opt_parser.error("Callback attempts must be at least 1.")
+
 
 
 log = pscheduler.Log(
     verbose=options.verbose,
     debug=options.debug,
-    factility=pscheduler.local5
+    facility=pscheduler.local5
 )
 
 dsn = pscheduler.string_from_file(options.dsn)
 
-log_details = not options.terse
 
 
-# TODO: Worker Here
+#
+# Database updater.  This serializes database updates but is just fine
+# because this is a relatively low-volume activity.
+#
+
+class DatabaseUpdater(object):
+
+    _STATES = [
+        # Pending should only be used by the database on insert
+        # Prep should only be used by the main program.
+        "trace",
+        "running",
+        "callback",
+        "finished",
+        "failed"
+    ]
+
+
+    def __init__(self, dsn, log, debug):
+
+        self.db = None
+        self.log = log
+        self.debug = debug
+
+        # A queue for getting work from other threads.  Things stay
+        # here just long enough to be moved to the deque, which
+        # doesn't have all of the nice thready features.
+        self.queue = Queue.Queue()
+
+        # This is the actual stack of work.  The right end is the top, the
+        # left end is the bottom.
+        self.deck = collections.deque()
+
+        self.worker = threading.Thread(target=lambda: self.run())
+        self.worker.setDaemon(True)
+        self.worker.start()
+
+
+    def __query(self, query, args):
+        if self.db is None:
+            self.db = pscheduler.pg_connection(dsn)
+            self.debug and self.log.debug("Updater: Connected")
+
+        self.debug and self.log.debug("Updater: Query: %s", query)
+        self.debug and self.log.debug("Updater: Args : %s", str(args))
+
+        try:
+            with self.db.cursor() as cursor:
+                cursor.execute(query, args)
+        except Exception as ex:
+            self.log.exception()
+            self.debug and self.log.debug("Updater: Disconnecting database")
+            self.db.close()
+            self.db = None
+            return False
+
+        return True
+
+
+    def run(self):
+
+        self.log.debug("Updater: Started.")
+
+        while True:
+
+            # Work off everything on the deck
+            while len(self.deck):
+                query, args = self.deck.pop()
+                if not self.__query(query, args):
+                    # If it failed, put it back.
+                    self.deck.append((query, args))
+
+            # Wait for something new and add it to the bottom of the deque
+            self.deck.appendleft(self.queue.get(True))
+
+
+
+    def __call__(self,
+                 task,
+                 state=None,   # String in __STATES
+                 eta=None,     # Datetime
+                 result=None,  # Anything that can be json_dump'd
+                 diags=None    # List of strings
+    ):
+
+        sets = []
+        args = []
+
+        if state is not None:
+            assert state in self._STATES
+            sets.append("state = task_state_%s()" % (state))
+
+        if eta is not None:
+            assert isinstance(eta, datetime.datetime)
+            sets.append("eta = %s")
+            args.append(pscheduler.datetime_as_iso8601(eta))
+
+        if result is not None:
+            sets.append("result = %s")
+            args.append(pscheduler.json_dump(result))
+
+        if diags is not None:
+            assert isinstance(diags, list)
+            sets.append("diags = %s")
+            args.append("\n".join(diags))
+
+        assert sets, "Something called with nothing to set."
+
+        query = "UPDATE task SET " + ", ".join(sets) + " WHERE id = %s"
+        args.append(task)
+
+        self.queue.put((query, args))
+
+
+
+
+#
+# Worker thread for a single task
+#
+
+class TaskWorker(object):
+
+    def __init__(self, task, spec, callback_href, log, worker_set, updater):
+
+        self.task = task
+        self.spec = spec
+        self.callback_href = callback_href
+        self.log = log
+        self.worker_set = worker_set
+        self.updater = updater
+
+        self.barrier = pscheduler.Barrier(2)
+        self.diags = []
+
+        self.worker = threading.Thread(target=lambda: self.__run_wrapper())
+        self.worker.setDaemon(True)
+        self.worker.start()
+
+        # Wait until the thread gets underway before finishing
+        log.debug("Waiting for thread %d to start", task)
+        self.barrier.wait()
+        log.debug("Thread %s is running", task)
+
+
+    def run(self):
+        # TODO: Run a traceroute if required
+        if True:
+            self.updater(self.task, state="trace")
+
+        self.updater(self.task, state="running")
+
+        # TODO: Run the pshooter
+        result = {}
+        self.diags.extend([ "All done.", "Hooray." ])
+
+        self.updater(self.task,
+                     result=result,
+                     diags=self.diags
+                     )
+        self.end_state = "finished"
+
+
+    def __callback(self):
+
+        if self.callback_href is not None:
+            self.log.debug("%d: Fetching callback", self.task)
+            self.updater(self.task, state="callback")
+            attempts = callback_attempts
+            while attempts:
+                (status, text) = pscheduler.url_get(self.callback_href,
+                                                    throw=False,
+                                                    json=False)
+                self.log.debug("%d: Callback returned %d: %s", self.task, status, text)
+                if status == 200:
+                    self.diags.append("Callback succeeded.")
+                    break
+
+                message = "Callback attempt failed: %d: %s" % (status, text)
+                self.log.debug("%d: %s", self.task, message)
+                self.diags.append(message)
+                time.sleep(callback_interval)
+                attempts -= 1
+
+            self.log.debug("%d: Callback %s", self.task,
+                           "succeeded" if attempts else "failed")
+
+
+    def __run_wrapper(self):
+
+        self.log.debug("%s: Started" % (self.task))
+
+        with pscheduler.ThreadSafeSetHold(self.worker_set, self.task) as hold:
+            # Let __init__ know it can proceed.
+            self.barrier.wait()
+            try:
+                self.run()  # This will set end_state
+            except Exception as ex:
+                self.log.exception()
+                self.diags.append("Exception while running: %s" % (ex))
+                self.end_state = "failed"
+
+            self.__callback()
+            self.updater(self.task, state=self.end_state, diags=self.diags)
+
+        self.log.debug("%s: Complete", self.task)
+                
+        
+
+
 
 
 #
@@ -98,28 +337,35 @@ def main_program():
     db = pscheduler.pg_connection(dsn)
     log.debug("Connected to DB")
 
-    # Pool of connections for use by the threads.  Note that these
-    # connections do not have autocommit, so anything using them will
-    # need to do its own commits.
-
-    dbpool = psycopg2.pool.ThreadedConnectionPool(
-        int(options.max_parallel/100),   # Minimum connections
-        options.max_parallel,            # Maximum connections
-        dsn="%s application_name=pshooter-pool" % (dsn))
-
     # Listen for notifications.
 
-    for listen in ["task_new"]:
+    for listen in ["task_new", "task_finished"]:
         log.debug("Listening for notification %s" % (listen))
         with db.cursor() as cursor:
             cursor.execute("LISTEN %s" % (listen))
 
+    updater = DatabaseUpdater(dsn, log, options.debug_updater)
+    workers = pscheduler.ThreadSafeSet()
+
+
     # Prime this for the first run
     wait_time = datetime.timedelta()
 
+    # Note that this will not work prior to 1970.  Please drop me a
+    # line if time travel is invented and this becomes aan issue.  :-)
+    last_maintenance = pscheduler.time_epoch()
+
+
     while True:
 
-        log.debug("Next run or check in %s", wait_time)
+        # Do housekeeping if it's that time.
+        if (pscheduler.time_now() - last_maintenance) > maintenance_interval:
+            log.debug("Doing maintenance")
+            with db.cursor() as maint:
+                maint.execute("DO $$ BEGIN PERFORM maintain(); END $$")
+                last_maintenance = pscheduler.time_now()
+
+        log.debug("Next check in %s", wait_time)
         if not pscheduler.timedelta_is_zero(wait_time):
 
             # Wait for a notification or the wait time to elapse.  Eat all
@@ -148,36 +394,48 @@ def main_program():
 
         with db.cursor() as cursor:
 
-            # Operate only on runs that are scheduled to start before the next
-            # forced refresh.
-            # TODO: Error check this.
+            # Get all pending tasks up to the number we're allowed to
+            # run in parallel.
+
+            limit = max_parallel - len(workers)
+            log.debug("Querying up to %d tasks", limit)
             cursor.execute("""
-                       SELECT 12345
-                   """, []);
+                       SELECT
+                           id, spec, callback_href
+                       FROM task
+                       WHERE state = task_state_pending()
+                       LIMIT %s
+                   """, [limit])
 
 
             wait_time = refresh
 
-            already_running = 0
-            run_ids = []
-            run_workers = []
             for row in cursor:
 
-                # TODO: Do something for each row.
-                pass
+                task, spec, callback_href = row
 
-        if already_running > 0:
-            log.debug("Skipped %d already-running runs", already_running)
+                if task in workers:
+                    log.debug("Skipping already-running task %d", task)
+                    continue
 
-        if not run_workers:
-            log.debug("No workers to run.")
-            wait_time = refresh
-            continue
+                worker = TaskWorker(task, spec, callback_href, log, workers, updater)
 
+                # This serves as an immediate interlock so the task
+                # isn't picked up by the next iteration of this loop.
+                with db.cursor() as update_cursor:
+                    update_cursor.execute(
+                        "UPDATE task SET state = task_state_prep() WHERE id = %s",
+                        [task])
+
+                wait_time = datetime.timedelta()
 
     # Not that this will ever be reached...
     db.close()
 
+
+# TODO: Remove this.
+main_program()
+exit(99)
 
 
 if options.daemon:

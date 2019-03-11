@@ -32,7 +32,7 @@ BEGIN
 
             -- How long we should keep old data
             keep   		INTERVAL
-        			DEFAULT 'P7D',
+        			DEFAULT 'P2D',
 
             -- Maximum runs in parallel
             max_parallel	INTEGER
