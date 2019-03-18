@@ -57,7 +57,7 @@ def json_query(query, query_args=[], name = 'name', single = False):
         return not_found()
     result = []
     for row in cursor:
-        this = base_url(None if single else row[0][name])
+        this = request.url
         row[0]['href'] = this
         result.append( row[0] if single or is_expanded() else this)
     cursor.close()

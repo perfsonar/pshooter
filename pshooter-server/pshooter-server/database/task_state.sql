@@ -41,6 +41,10 @@ BEGIN
         	enum		TEXT
         			UNIQUE NOT NULL,
 
+        	-- True if the state represents a running state
+        	running		BOOLEAN
+        			NOT NULL,
+
         	-- True if the state represents a finished state
         	finished	BOOLEAN
         			NOT NULL
@@ -150,6 +154,16 @@ $$ LANGUAGE plpgsql;
 ALTER FUNCTION task_state_failed() IMMUTABLE;
 
 
+-- Task was canceled before it got started
+CREATE OR REPLACE FUNCTION task_state_canceled()
+RETURNS INTEGER
+AS $$
+BEGIN
+	RETURN 8;
+END;
+$$ LANGUAGE plpgsql;
+ALTER FUNCTION task_state_canceled() IMMUTABLE;
+
 
 
 DROP TRIGGER IF EXISTS task_state_alter ON task_state CASCADE;
@@ -174,15 +188,16 @@ ON task_state
 -- the table was previously populated.
 
 ALTER TABLE task_state DISABLE TRIGGER task_state_alter;
-INSERT INTO task_state (id, display, enum, finished)
+INSERT INTO task_state (id, display, enum, running, finished)
 VALUES
-    (task_state_pending(),   'Pending',     'pending',   FALSE),
-    (task_state_prep(),      'Preparing',   'prep',      FALSE),
-    (task_state_trace(),     'Trace',       'trace',     FALSE),
-    (task_state_running(),   'Running',     'running',   FALSE),
-    (task_state_callback(),  'Callback',    'callback',  FALSE),
-    (task_state_finished(),  'Finished',    'finished',  TRUE),
-    (task_state_failed(),    'Failed',      'failed',    TRUE)
+    (task_state_pending(),   'Pending',     'pending',   FALSE, FALSE),
+    (task_state_prep(),      'Preparing',   'prep',      TRUE,  FALSE),
+    (task_state_trace(),     'Trace',       'trace',     TRUE,  FALSE),
+    (task_state_running(),   'Running',     'running',   TRUE,  FALSE),
+    (task_state_callback(),  'Callback',    'callback',  FALSE, TRUE),
+    (task_state_finished(),  'Finished',    'finished',  FALSE, TRUE),
+    (task_state_failed(),    'Failed',      'failed',    FALSE, TRUE),
+    (task_state_canceled(),  'Canceled',    'canceled',  FALSE, TRUE)
 ON CONFLICT (id) DO UPDATE
 SET
     display = EXCLUDED.display,
@@ -205,14 +220,17 @@ BEGIN
     RETURN new = old
            OR   ( old = task_state_pending()
 	          AND new IN (task_state_prep(),
-			      task_state_failed()) )
+			      task_state_failed(),
+			      task_state_canceled()) )
            OR   ( old = task_state_prep()
 	          AND new IN (task_state_trace(),
 			      task_state_running(),
-			      task_state_failed()) )
+			      task_state_failed(),
+			      task_state_canceled()) )
            OR   ( old = task_state_trace()
 	          AND new IN (task_state_running(),
-			      task_state_failed()) )
+			      task_state_failed(),
+			      task_state_canceled()) )
            OR ( old = task_state_running()
 	        AND new IN (task_state_callback(),
 			    task_state_failed()) )

@@ -49,9 +49,6 @@ BEGIN
         	spec		JSON
         			NOT NULL,
 
-        	-- URL to GET after the task completes
-        	callback_href	TEXT,
-
         	-- Current state
         	state		INTEGER
         			REFERENCES task_state(id)
@@ -139,7 +136,6 @@ BEGIN
     -- Fill in the full version of the JSON
     NEW.fullrec := json_build_object(
         'spec', NEW.spec,
-        '_callback-href', NEW.callback_href,
 	'result', NEW.result,
 	'diags', NEW.diags,
 	'eta', timestamp_with_time_zone_to_iso8601(NEW.eta),
@@ -163,6 +159,30 @@ CREATE TRIGGER task_insert_update BEFORE INSERT OR UPDATE ON task
 --- Maintenance
 ---
 
+DO $$ BEGIN PERFORM drop_function_all('task_reset'); END $$;
+
+CREATE OR REPLACE FUNCTION task_reset()
+RETURNS VOID
+AS $$
+BEGIN
+
+    -- Reset all running tasks to pending so they get picked up and
+    -- run again.
+
+    UPDATE task
+    SET
+        state = task_state_pending(),
+        eta = NULL
+    WHERE
+        state IN (SELECT id FROM task_state WHERE running);
+
+END;
+$$ LANGUAGE plpgsql;
+
+
+
+DO $$ BEGIN PERFORM drop_function_all('task_maintain'); END $$;
+
 CREATE OR REPLACE FUNCTION task_maintain()
 RETURNS VOID
 AS $$
@@ -185,3 +205,34 @@ $$ LANGUAGE plpgsql;
 ---
 --- API
 ---
+
+DO $$ BEGIN PERFORM drop_function_all('api_task_post'); END $$;
+
+CREATE OR REPLACE FUNCTION api_task_post(spec JSON)
+RETURNS UUID
+AS $$
+DECLARE
+    inserted RECORD;
+BEGIN
+
+    WITH inserted_row AS (
+        INSERT INTO TASK (spec) VALUES (spec)
+        RETURNING *
+    ) SELECT INTO inserted * FROM inserted_row;
+
+    RETURN inserted.uuid;
+
+END;
+$$ LANGUAGE plpgsql;
+
+
+
+DO $$ BEGIN PERFORM drop_function_all('api_task_cancel'); END $$;
+
+CREATE OR REPLACE FUNCTION api_task_cancel(task UUID)
+RETURNS BOOLEAN
+AS $$
+BEGIN
+    RAISE EXCEPTION 'Not implemented yet.';
+END;
+$$ LANGUAGE plpgsql;

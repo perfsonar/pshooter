@@ -60,17 +60,6 @@ opt_parser.add_option("--maintenance-interval",
                       action="store", type="string", dest="maintenance_interval",
                       default="PT5M")
 
-opt_parser.add_option("--callback-interval",
-                      help="Time between notification callback attempts (ISO8601)",
-                      action="store", type="string", dest="callback_interval",
-                      default="PT15S")
-opt_parser.add_option("--callback-attempts",
-                      help="Times to attempt a notification callback before giving up",
-                      action="store", type="int", dest="callback_attempts",
-                      default=20)
-
-
-
 opt_parser.add_option("--verbose", action="store_true", dest="verbose", default=False)
 opt_parser.add_option("--debug", action="store_true", dest="debug", default=False)
 opt_parser.add_option("--debug-updater", action="store_true", dest="debug_updater", default=False)
@@ -90,18 +79,6 @@ try:
     maintenance_interval = pscheduler.iso8601_as_timedelta(options.maintenance_interval)
 except ValueError:
     opt_parser.error('Invalid maintenance interval "' + options.maintenance_interval + '"')
-
-try:
-    callback_interval = pscheduler.timedelta_as_seconds(
-        pscheduler.iso8601_as_timedelta(options.callback_interval)
-    )
-except ValueError:
-    opt_parser.error('Invalid callback interval "' + options.callback_interval + '"')
-
-callback_attempts = options.callback_attempts
-if callback_attempts < 1:
-    opt_parser.error("Callback attempts must be at least 1.")
-
 
 
 log = pscheduler.Log(
@@ -236,13 +213,11 @@ class DatabaseUpdater(object):
 
 class TaskWorker(object):
 
-    def __init__(self, task, spec, callback_href, log, worker_set, updater):
+    def __init__(self, task, spec, log, updater):
 
         self.task = task
         self.spec = spec
-        self.callback_href = callback_href
         self.log = log
-        self.worker_set = worker_set
         self.updater = updater
 
         self.barrier = pscheduler.Barrier(2)
@@ -267,6 +242,11 @@ class TaskWorker(object):
 
         # TODO: Run the pshooter
         result = {}
+
+        # TODO: Remove this.
+        time.sleep(2.0)
+
+
         self.diags.extend([ "All done.", "Hooray." ])
 
         self.updater(self.task,
@@ -278,46 +258,68 @@ class TaskWorker(object):
 
     def __callback(self):
 
-        if self.callback_href is not None:
-            self.log.debug("%d: Fetching callback", self.task)
-            self.updater(self.task, state="callback")
-            attempts = callback_attempts
-            while attempts:
-                (status, text) = pscheduler.url_get(self.callback_href,
-                                                    throw=False,
-                                                    json=False)
-                self.log.debug("%d: Callback returned %d: %s", self.task, status, text)
-                if status == 200:
-                    self.diags.append("Callback succeeded.")
-                    break
+        if "callback" not in self.spec:
+            return
 
-                message = "Callback attempt failed: %d: %s" % (status, text)
+        self.log.debug("%d: Starting callback", self.task)
+        self.updater(self.task, state="callback")
+
+        # The callback can be assumed to have been validated on the way in.
+
+        cb_spec = self.spec["callback"]
+
+        retry_policy = cb_spec.get("retry-policy",
+                                   {"attempts": 1, "wait": "PT1S"})
+        retry = pscheduler.RetryPolicy(retry_policy)
+
+        attempt = 0
+        while True:
+            self.log.debug("%d: Callback attempt %d", self.task, attempt)
+            (status, text) = pscheduler.url_get(cb_spec["_href"],
+                                                bind=cb_spec.get("_bind", None),
+                                                params=cb_spec.get("_params", None),
+                                                headers=cb_spec.get("_headers", None),
+                                                throw=False,
+                                                json=False)
+            self.log.debug("%d: Callback returned %d: %s", self.task, status, text)
+
+            if status == 200:
+                self.log.debug("Callback succeeded.")
+                self.diags.append("Callback succeeded.")
+                break
+
+            self.diags.append("Callback attempt failed: %d: %s" % (status, text))
+
+            retry_sleep = retry.retry(attempt)
+
+            if retry_sleep is None:
+                message = "Ran out of callback retries.  Giving up."
                 self.log.debug("%d: %s", self.task, message)
                 self.diags.append(message)
-                time.sleep(callback_interval)
-                attempts -= 1
+                break
 
-            self.log.debug("%d: Callback %s", self.task,
-                           "succeeded" if attempts else "failed")
+            self.log.debug("%d: Sleeping %s until next retry", self.task, retry_sleep)
+            time.sleep(pscheduler.timedelta_as_seconds(retry_sleep))
+
+            attempt += 1
 
 
     def __run_wrapper(self):
 
         self.log.debug("%s: Started" % (self.task))
 
-        with pscheduler.ThreadSafeSetHold(self.worker_set, self.task) as hold:
-            # Let __init__ know it can proceed.
-            self.barrier.wait()
-            try:
-                self.run()  # This will set end_state
-            except Exception as ex:
-                self.log.exception()
-                self.diags.append("Exception while running: %s" % (ex))
-                self.end_state = "failed"
+        # Let __init__ know it can proceed.
+        self.barrier.wait()
 
-            self.__callback()
-            self.updater(self.task, state=self.end_state, diags=self.diags)
+        try:
+            self.run()  # This will set end_state
+        except Exception as ex:
+            self.log.exception()
+            self.diags.append("Exception while running: %s" % (ex))
+            self.end_state = "failed"
 
+        self.__callback()
+        self.updater(self.task, state=self.end_state, diags=self.diags)
         self.log.debug("%s: Complete", self.task)
                 
         
@@ -345,7 +347,11 @@ def main_program():
             cursor.execute("LISTEN %s" % (listen))
 
     updater = DatabaseUpdater(dsn, log, options.debug_updater)
-    workers = pscheduler.ThreadSafeSet()
+
+
+    # Force anything that looks like it was running into a failed state.
+    with db.cursor() as cursor:
+        cursor.execute("DO $$ BEGIN PERFORM task_reset(); END $$")
 
 
     # Prime this for the first run
@@ -397,37 +403,51 @@ def main_program():
             # Get all pending tasks up to the number we're allowed to
             # run in parallel.
 
-            limit = max_parallel - len(workers)
-            log.debug("Querying up to %d tasks", limit)
             cursor.execute("""
-                       SELECT
-                           id, spec, callback_href
-                       FROM task
+                       SELECT id, spec, added FROM (
+                           SELECT
+                               task.id,
+                               task.spec,
+                               task.state,
+                               task_state.running AS pick_order,
+                               task.added
+                           FROM
+                               task
+                               JOIN task_state ON task_state.id = task.state
+                           WHERE
+                               NOT task_state.finished
+                           ORDER BY
+                               pick_order DESC,  -- Put runners first
+                               added ASC
+                           LIMIT %s
+                       ) t
                        WHERE state = task_state_pending()
-                       LIMIT %s
-                   """, [limit])
+                       ORDER BY added -- Get tasks in FIFO order
+                   """, [max_parallel])
 
 
             wait_time = refresh
 
+            ids = []
+
             for row in cursor:
 
-                task, spec, callback_href = row
+                task, spec, added = row
+                log.debug("Starting %d, added %s", task, added)
+                worker = TaskWorker(task, spec, log, updater)
+                ids.append(task)
+                wait_time = datetime.timedelta()
 
-                if task in workers:
-                    log.debug("Skipping already-running task %d", task)
-                    continue
 
-                worker = TaskWorker(task, spec, callback_href, log, workers, updater)
-
-                # This serves as an immediate interlock so the task
-                # isn't picked up by the next iteration of this loop.
+            # This serves as an immediate interlock for all tasks that
+            # were started so they're not picked up by the next
+            # iteration of this loop.
+            if ids:
                 with db.cursor() as update_cursor:
                     update_cursor.execute(
-                        "UPDATE task SET state = task_state_prep() WHERE id = %s",
-                        [task])
+                        "UPDATE task SET state = task_state_prep() WHERE id IN %s",
+                        [tuple(ids)])
 
-                wait_time = datetime.timedelta()
 
     # Not that this will ever be reached...
     db.close()

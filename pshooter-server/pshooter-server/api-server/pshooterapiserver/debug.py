@@ -23,7 +23,7 @@ from .args import *
 
 module = sys.modules[__name__]
 
-module.DEBUG_FILE = "%s/pscheduler-api-debug" \
+module.DEBUG_FILE = "%s/pshooter-api-debug" \
                     % (os.environ.get("TMPDIR", "/tmp"))
 module.CHECK_INTERVAL = 5
 module.state = False

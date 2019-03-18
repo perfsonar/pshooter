@@ -29,4 +29,4 @@ class APILog(pscheduler.Log):
 
 
 # This is thread-safe, so no need to do anything special with it.
-log = APILog(name='pscheduler-api', signals=False, propagate=True)
+log = APILog(name='pshooter-api', signals=False, propagate=True)

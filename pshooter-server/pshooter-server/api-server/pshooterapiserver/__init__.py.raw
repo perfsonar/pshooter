@@ -23,9 +23,9 @@ from .admin import *
 from .args import *
 from .dbcursor import *
 from .json import *
-### from .stat import *
-### from .tasks import *
-### from .util import *
+from .stat import *
+from .tasks import *
+from .util import *
 
 
 # These values are not hard-wired; they were filled in during the
