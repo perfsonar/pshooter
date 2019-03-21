@@ -49,10 +49,18 @@ BEGIN
         	spec		JSON
         			NOT NULL,
 
+
+        	-- Requester hints, as provided by the API server
+        	hints		JSON
+        			NOT NULL,
+
         	-- Current state
         	state		INTEGER
         			REFERENCES task_state(id)
         			DEFAULT task_state_pending(),
+
+        	-- Path, as supplied or traced (provided by the service)
+        	path		JSON,
 
         	-- Time when we think the tests will be finished
         	eta		TIMESTAMP WITH TIME ZONE,
@@ -135,12 +143,14 @@ BEGIN
 
     -- Fill in the full version of the JSON
     NEW.fullrec := json_build_object(
-        'spec', NEW.spec,
-	'result', NEW.result,
 	'diags', NEW.diags,
 	'eta', timestamp_with_time_zone_to_iso8601(NEW.eta),
-	'state', (SELECT enum FROM task_state where task_state.id = NEW.state),
-	'state-display', (SELECT display FROM task_state where task_state.id = NEW.state)
+	'hints', NEW.hints,
+	'path', NEW.path,
+	'result', NEW.result,
+        'spec', NEW.spec,
+	'state-display', (SELECT display FROM task_state where task_state.id = NEW.state),
+	'state', (SELECT enum FROM task_state where task_state.id = NEW.state)
 	);
 
 
@@ -201,6 +211,25 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+--
+-- A view for development convenience
+--
+
+DROP VIEW IF EXISTS task_summary;
+
+CREATE OR REPLACE VIEW task_summary AS
+SELECT
+    task.id,
+    task_state.enum AS state,
+    task.added,
+    task.eta
+FROM
+    task
+    JOIN task_state on task_state.id = task.state
+ORDER BY added
+;
+
+
 
 ---
 --- API
@@ -208,7 +237,7 @@ $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN PERFORM drop_function_all('api_task_post'); END $$;
 
-CREATE OR REPLACE FUNCTION api_task_post(spec JSON)
+CREATE OR REPLACE FUNCTION api_task_post(spec JSON, hints JSON)
 RETURNS UUID
 AS $$
 DECLARE
@@ -216,7 +245,7 @@ DECLARE
 BEGIN
 
     WITH inserted_row AS (
-        INSERT INTO TASK (spec) VALUES (spec)
+        INSERT INTO TASK (spec, hints) VALUES (spec, hints)
         RETURNING *
     ) SELECT INTO inserted * FROM inserted_row;
 

@@ -119,12 +119,15 @@ def tasks():
     if not valid:
         return bad_request("Invalid task specification: %s" % (message))
 
+
     # TODO: Need to get and stash the actual requester so the service
     # can do a proxied request and pScheduler can enforce its limits.
 
     cursor = dbcursor_query(
-            "SELECT * FROM api_task_post(%s)",
-            [ pscheduler.json_dump(task) ])
+            "SELECT * FROM api_task_post(%s, %s)",
+            [ pscheduler.json_dump(task),
+              pscheduler.json_dump(request_hints())
+          ])
 
     if cursor.rowcount == 0:
         return error("Task post failed; API returned nothing.")

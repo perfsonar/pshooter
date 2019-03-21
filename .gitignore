@@ -1,0 +1,22 @@
+# Ignore mac hidden file
+.DS_Store
+
+# Editor Droppings
+.*.swp
+*~
+
+# Ignore rpms, logs and other build artifacts
+*.rpm
+*.pyc
+*.log
+*/rpmbuild
+REPO/
+*/.rpmmacros
+*/BUILD-ROOT/
+*.egg-info
+*.coverage
+*.pc/
+
+# Ignore quilt cache directory and backup files
+.pc/
+debian/patches/*~

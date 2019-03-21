@@ -20,7 +20,8 @@ class TaskRunner(object):
 
     def __diag(self, message):
         """Add a message to the diagnostics"""
-        self.diags.append(message)
+        self.results["diags"].append(message)
+        # TODO: Remove this
         if sys.stderr.isatty():
             sys.stderr.write(message + "\n")
 
@@ -52,7 +53,6 @@ class TaskRunner(object):
             },
             "diags": []
         }
-        self.diags = self.results["diags"]
 
         # Make sure we have sufficient pSchedulers to cover the participants
         if len(participants) == 2 and "pscheduler" not in z:
@@ -86,6 +86,7 @@ class TaskRunner(object):
                                                data=pscheduler.json_dump(task),
                                                throw=False)
         if status != 200:
+            self.__diag("Task: %s" % (task))
             self.__diag("Unable to post task: %s" % (task_url))
             return
 
@@ -145,6 +146,8 @@ class TaskRunner(object):
 
         # The extra five seconds is a breather for the server to 
         # assemble the final result.
+
+        # TODO: Use pscheudler.time_until_seconds()
         sleep_seconds = (sleep_time.days * 86400) \
                         + (sleep_time.seconds) \
                         + (sleep_time.microseconds / (10.0**6)) \
@@ -153,13 +156,18 @@ class TaskRunner(object):
         self.__debug("Sleeping %f seconds" % (sleep_seconds))
         time.sleep(sleep_seconds)
 
+        result_href = self.run_data["result-href"]
+        # TODO: Do a fetch/wait on the result
+
+
         # Fetch the results in all formats we return.
 
         # TODO: Need to handle run failures
 
+
         self.results["results"] = {}
 
-        result_href = self.run_data["result-href"]
+
         for fmt in [ "application/json", "text/plain", "text/html" ]:
             status, result = pscheduler.url_get(
                 result_href,
@@ -200,7 +208,7 @@ class TaskRunner(object):
 if __name__ == "__main__":
 
     test = {
-        "type": "simplestream",
+        "type": "trace",
         "spec": {
             "schema": 1,
             "dest": "__Z__"
@@ -208,18 +216,20 @@ if __name__ == "__main__":
     }
 
     a = {
-        "pscheduler": "dev7",
-        "host": "dev7"
+        "pscheduler": "dev1",
+        "host": "dev1"
     }
 
+    # This is okay for the other end if it's a one-participant test
     z = {
-        "pscheduler": "dev6",
-        "host": "dev6"
+        "pscheduler": "www.perfsonar.net",
+        "host": "www.perfsonar.net"
     }
 
-    participants = [ "dev7", "dev6" ]
+    participants = [ "dev1" ]
 
 
 
-    r = TaskRunner(test, participants, a, z, debug=True)
-    print pscheduler.json_dump(r.result(), pretty=True)
+    runner = TaskRunner(test, participants, a, z, debug=True)
+    result = runner.result()
+    print pscheduler.json_dump(result, pretty=True)

@@ -32,6 +32,8 @@ def request_hints():
 
 
 
+
+# TODO: This is pScheduler code.  Get rid of it.
 def task_requester_key(task_uuid):
     """
     Get the requester and key for a task from its hints.

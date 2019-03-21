@@ -22,6 +22,9 @@ import socket
 import threading
 import time
 
+from resolver import HybridResolver
+from taskrunner import TaskRunner
+from testrunner import run_test
 
 pscheduler.set_graceful_exit()
 
@@ -171,6 +174,7 @@ class DatabaseUpdater(object):
     def __call__(self,
                  task,
                  state=None,   # String in __STATES
+                 path=None,    # Supplied or traced path
                  eta=None,     # Datetime
                  result=None,  # Anything that can be json_dump'd
                  diags=None    # List of strings
@@ -182,6 +186,11 @@ class DatabaseUpdater(object):
         if state is not None:
             assert state in self._STATES
             sets.append("state = task_state_%s()" % (state))
+
+        if path is not None:
+            assert isinstance(path, list)
+            sets.append("path = %s")
+            args.append(pscheduler.json_dump(path))
 
         if eta is not None:
             assert isinstance(eta, datetime.datetime)
@@ -213,41 +222,129 @@ class DatabaseUpdater(object):
 
 class TaskWorker(object):
 
-    def __init__(self, task, spec, log, updater):
+    def __init__(self, task, spec, hints, log, updater):
 
         self.task = task
         self.spec = spec
+        self.hints = hints
         self.log = log
         self.updater = updater
 
-        self.barrier = pscheduler.Barrier(2)
         self.diags = []
 
         self.worker = threading.Thread(target=lambda: self.__run_wrapper())
         self.worker.setDaemon(True)
+
+        self.log.debug("%d: Initialized", task)
+
+
+    def start(self):
         self.worker.start()
 
-        # Wait until the thread gets underway before finishing
-        log.debug("Waiting for thread %d to start", task)
-        self.barrier.wait()
-        log.debug("Thread %s is running", task)
+
+    def _trace(self):
+        self.log.debug("%d: Starting trace to %s", self.task, self.spec["path"])
+
+        # TODO: Need to handle IPv4/IPv6?
+
+        runner = TaskRunner(
+            # Task
+            {
+                "type": "trace",
+                "spec": {
+                    "schema": 1,
+                    "dest": self.spec["path"]
+                }
+            },
+            # Participants
+            ["localhost"],
+            # A and Z ends
+            { "pscheduler": "localhost", "host": "localhost" },
+            { "pscheduler": "localhost", "host": self.spec["path"] },
+            debug=True
+        )
+
+        trace_result = runner.result()
+        try:
+            result = trace_result["results"]["application/json"]
+        except KeyError:
+            self.diags.append("Trace failed:  No result")
+            return None
+        self.log.debug("%d: Trace complete" % (self.task))
+        self.diags.append("Trace diagnostics:\n  %s"
+                          % ("\n  ".join(trace_result["diags"])))
+
+        if not result.get("succeeded", False):
+            self.diags.append("Trace failed: %s"
+                              % (result.get("error", "No error message available")))
+            return 
+
+        path = [ value
+                 for value in [ hop.get("ip", None) for hop in result["paths"][0]]
+                 if value is not None ]
+        self.log.debug("%d: Path is %s" % (self.task, path))
+        return path
+
 
 
     def run(self):
-        # TODO: Run a traceroute if required
-        if True:
-            self.updater(self.task, state="trace")
 
+        # 
+        # Use the supplied path or trace one
+        #
+
+        if isinstance(self.spec["path"], list):
+            path = self.spec["path"]
+        else:
+            self.updater(self.task, state="trace")
+            path = self._trace()
+            if path is None:
+                self.log.debug("%d: Trace failed", self.task)
+                self.end_state = "failed"
+                self.updater(self.task, self.end_state, diags=self.diags)
+                return
+
+
+        #
+        # Prepare the path for pShooter
+        #
+        # TODO: Move this into run_test
+
+        # Scrub out any local interfaces
+        local_ips = pscheduler.LocalIPList()
+        path = [ hop
+                 for hop in path
+                 if hop not in local_ips ]
+
+        # Figure out what local interface will be used to reach the
+        # first hop and prepend that to the path.
+
+        local_interface = pscheduler.source_interface(path[0])[0] 
+        self.log.debug("%d: Prepending local outbound interface %s",
+                       self.task, local_interface)
+        path.insert(0, local_interface)
+
+        self.path = path
+        self.updater(self.task, path=path)
+
+
+        #
+        # Run the test
+        #
+
+        self.log.debug("%d: pShooting", self.task)
         self.updater(self.task, state="running")
 
-        # TODO: Run the pshooter
-        result = {}
+        resolver = HybridResolver(self.spec.get("dns", {}))
+        result = run_test(
+            {
+                "path": self.path,
+                "test": self.spec["test"]
+            },
+            resolver
+        )
 
-        # TODO: Remove this.
-        time.sleep(2.0)
-
-
-        self.diags.extend([ "All done.", "Hooray." ])
+        self.diags.append("Finished")
 
         self.updater(self.task,
                      result=result,
@@ -306,10 +403,7 @@ class TaskWorker(object):
 
     def __run_wrapper(self):
 
-        self.log.debug("%s: Started" % (self.task))
-
-        # Let __init__ know it can proceed.
-        self.barrier.wait()
+        self.log.debug("%s: Running" % (self.task))
 
         try:
             self.run()  # This will set end_state
@@ -404,10 +498,11 @@ def main_program():
             # run in parallel.
 
             cursor.execute("""
-                       SELECT id, spec, added FROM (
+                       SELECT id, spec, hints, added FROM (
                            SELECT
                                task.id,
                                task.spec,
+                               task.hints,
                                task.state,
                                task_state.running AS pick_order,
                                task.added
@@ -428,25 +523,32 @@ def main_program():
 
             wait_time = refresh
 
+            workers = []
             ids = []
 
             for row in cursor:
 
-                task, spec, added = row
+                task, spec, hints, added = row
                 log.debug("Starting %d, added %s", task, added)
-                worker = TaskWorker(task, spec, log, updater)
+                worker = TaskWorker(task, spec, hints, log, updater)
+                workers.append(worker)
                 ids.append(task)
-                wait_time = datetime.timedelta()
-
 
             # This serves as an immediate interlock for all tasks that
             # were started so they're not picked up by the next
             # iteration of this loop.
+
             if ids:
                 with db.cursor() as update_cursor:
                     update_cursor.execute(
                         "UPDATE task SET state = task_state_prep() WHERE id IN %s",
                         [tuple(ids)])
+
+                wait_time = datetime.timedelta()
+
+            # Let the workers do their things
+            for worker in workers:
+                worker.start()
 
 
     # Not that this will ever be reached...

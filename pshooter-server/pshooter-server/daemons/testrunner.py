@@ -5,7 +5,6 @@ import ipaddress
 import sys
 
 from parallelrun import *
-from hybridresolver import *
 from taskrunner import *
 
 
@@ -276,15 +275,3 @@ def run_test(data, resolver):
         results.append(result)
 
     return results
-
-if __name__ == "__main__":
-
-    test_file = sys.argv[1]
-    zone_file = sys.argv[2]
-
-    with open(test_file, "r") as datafile:
-        data = pscheduler.json_load(datafile)
-
-    resolver = HybridResolver(zone_file)
-
-    print pscheduler.json_dump(run_test(data, resolver), pretty=True)
