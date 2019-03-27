@@ -94,7 +94,7 @@ class StaticResolver(object):
             record
     ):
         """
-        TODO: Description
+        Resolve the host and requested record
         """
 
         labels_forward = host.lower().split(".")

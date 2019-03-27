@@ -144,9 +144,6 @@ build: $(DAEMONS) $(INITS) $(UNITS) $(CONFIGS) $(COMMANDS) $(BINS)
 
 
 
-# TODO: This target needs to have a SYSCONFDIR passed in and fill in
-# the right value in the scripts.  (See TODOs)
-
 install: build
 ifndef BINDIR
 	@echo No BINDIR specified for installation
@@ -188,4 +185,4 @@ endif
 
 
 clean:
-	rm -rf $(TO_CLEAN) *~
+	rm -rf $(TO_CLEAN) *.pyc *~

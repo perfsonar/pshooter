@@ -3,22 +3,16 @@
 # Execute pShooter measurements
 #
 
-# TODO: Remove unused imports
 import collections
 import daemon
 import datetime
 import errno
-import logging
-import multiprocessing
 import optparse
 import pscheduler
 import psycopg2
 import psycopg2.extensions
-import psycopg2.pool
 import Queue
 import select
-import signal
-import socket
 import threading
 import time
 
@@ -245,8 +239,6 @@ class TaskWorker(object):
     def _trace(self):
         self.log.debug("%d: Starting trace to %s", self.task, self.spec["path"])
 
-        # TODO: Need to handle IPv4/IPv6?
-
         runner = TaskRunner(
             # Task
             {
@@ -282,7 +274,6 @@ class TaskWorker(object):
         path = [ value
                  for value in [ hop.get("ip", None) for hop in result["paths"][0]]
                  if value is not None ]
-        self.log.debug("%d: Path is %s" % (self.task, path))
         return path
 
 
@@ -308,7 +299,6 @@ class TaskWorker(object):
         #
         # Prepare the path for pShooter
         #
-        # TODO: Move this into run_test
 
         # Scrub out any local interfaces
         local_ips = pscheduler.LocalIPList()
@@ -323,6 +313,7 @@ class TaskWorker(object):
         self.log.debug("%d: Prepending local outbound interface %s",
                        self.task, local_interface)
         path.insert(0, local_interface)
+        self.log.debug("%d: Path is %s" % (self.task, path))
 
         self.path = path
         self.updater(self.task, path=path)
@@ -341,7 +332,9 @@ class TaskWorker(object):
                 "path": self.path,
                 "test": self.spec["test"]
             },
-            resolver
+            resolver,
+            self.log,
+            self.task
         )
 
         self.diags.append("Finished")
@@ -471,9 +464,6 @@ def main_program():
             # Wait for a notification or the wait time to elapse.  Eat all
             # notifications as a group; we only care that we were notified.
 
-            # TODO: This try needs to be brought to the other programs.
-            # Better, make it a function in db.py.
-
             try:
                 if pscheduler.polled_select(
                         [db],[],[],
@@ -554,10 +544,6 @@ def main_program():
     # Not that this will ever be reached...
     db.close()
 
-
-# TODO: Remove this.
-main_program()
-exit(99)
 
 
 if options.daemon:

@@ -18,18 +18,16 @@ class TaskRunner(object):
     Task Runner
     """
 
+    def __debug(self, message):
+        """Log a debug message"""
+        self.log.debug("%s: %s: %s" % (self.task, self.z["host"], message))
+
+
     def __diag(self, message):
         """Add a message to the diagnostics"""
         self.results["diags"].append(message)
-        # TODO: Remove this
-        if sys.stderr.isatty():
-            sys.stderr.write(message + "\n")
+        self.__debug(message)
 
-
-    def __debug(self, message):
-        """Add a debug message to the diagnostics"""
-        if self.debug:
-            self.__diag(message)
 
 
     def __init__(
@@ -38,13 +36,19 @@ class TaskRunner(object):
             participants,
             a,
             z,
-            debug=False
+            log,
+            task
             ):
         """
         Construct a task runner
         """
 
-        self.debug = debug
+        self.test = test
+        self.participants = participants
+        self.a = a
+        self.z = z
+        self.log = log
+        self.task = task
 
         self.results = {
             "hosts": {
@@ -54,19 +58,21 @@ class TaskRunner(object):
             "diags": []
         }
 
+        """This runs the process."""
         # Make sure we have sufficient pSchedulers to cover the participants
-        if len(participants) == 2 and "pscheduler" not in z:
-            # TODO: Assert that Z has a host?
-            #self.__diag("No pScheduler for or on %s." % (z["host"]))
+        if len(self.participants) == 2 and "pscheduler" not in self.z:
+            self.__diag("No pScheduler for or on %s." % (self.z["host"]))
             return
 
-        self.results["participants"] = [ a["host"], z["host"] ][0:len(participants)]
+        self.results["participants"] = [ self.a["host"], self.z["host"] ][0:len(self.participants)]
 
         # Fill in the test's blanks and construct a task spec
 
-        test = copy.deepcopy(test)
-        test = pscheduler.json_substitute(test, "__A__", a["pscheduler"])
-        test = pscheduler.json_substitute(test, "__Z__", z.get("pscheduler", z["host"]))
+        a_end = self.a["pscheduler"]
+        z_end = self.z.get("pscheduler", self.z["host"])
+        test = copy.deepcopy(self.test)
+        test = pscheduler.json_substitute(test, "__A__", a_end)
+        test = pscheduler.json_substitute(test, "__Z__", z_end)
      
         task = {
             "schema": 1,
@@ -80,13 +86,14 @@ class TaskRunner(object):
 
         # Post the task
 
-        task_post = pscheduler.api_url(host=a["pscheduler"], path="/tasks")
+        self.__debug("Posting task %s -> %s" % (a_end, z_end))
+        task_post = pscheduler.api_url(host=a_end, path="/tasks")
 
         status, task_url = pscheduler.url_post(task_post,
                                                data=pscheduler.json_dump(task),
                                                throw=False)
         if status != 200:
-            self.__diag("Task: %s" % (task))
+            self.__diag("Task: %s" % (self.task))
             self.__diag("Unable to post task: %s" % (task_url))
             return
 
@@ -131,7 +138,6 @@ class TaskRunner(object):
 
 
     def __run(self):
-        """This runs the process."""
 
         # Wait for the run time to have passed
 
@@ -140,35 +146,37 @@ class TaskRunner(object):
             end_time = dateutil.parser.parse(self.run_data["end-time"])
         except ValueError as ex:
             self.__diag("Server did not return a valid end time for the task: %s" % (str(ex)))
+            return
 
-        now = datetime.datetime.now(tzlocal())
-        sleep_time = end_time - now if end_time > now else datetime.timedelta()
+        # Wait for the task to run.  The extra time added is a
+        # breather for the server to assemble the final result.
 
-        # The extra five seconds is a breather for the server to 
-        # assemble the final result.
+        if end_time >= pscheduler.time_now():
+            sleep_time = pscheduler.time_until_seconds(end_time) + 3
+            self.__debug("Sleeping %f seconds" % (sleep_time))
+            time.sleep(sleep_time)
 
-        # TODO: Use pscheudler.time_until_seconds()
-        sleep_seconds = (sleep_time.days * 86400) \
-                        + (sleep_time.seconds) \
-                        + (sleep_time.microseconds / (10.0**6)) \
-                        + 5
-
-        self.__debug("Sleeping %f seconds" % (sleep_seconds))
-        time.sleep(sleep_seconds)
+        # Fetch the run, waiting for the result
 
         result_href = self.run_data["result-href"]
-        # TODO: Do a fetch/wait on the result
 
+        self.__debug("Waiting for result to be ready")
+        status, run = pscheduler.url_get(
+            self.run_data["href"],
+            params={ 'wait-merged': True },
+            throw=False)
+
+        if status != 200:
+            self.__diag("Failed to fetch run for result: %d: %s" % (status, run))
+            return
 
         # Fetch the results in all formats we return.
-
-        # TODO: Need to handle run failures
-
 
         self.results["results"] = {}
 
 
         for fmt in [ "application/json", "text/plain", "text/html" ]:
+            self.__debug("Fetching %s" % (fmt))
             status, result = pscheduler.url_get(
                 result_href,
                 params={ "wait-merged": True, "format": fmt },
@@ -177,6 +185,10 @@ class TaskRunner(object):
             )
             if status != 200:
                 self.__diag("Failed to get %s result: %s" % (fmt, result))
+                return
+
+            if fmt == "application/json" and not result.get("succeeded", False):
+                self.__diag("Task failed.")
                 return
 
             self.results["results"][fmt] = result
@@ -190,6 +202,7 @@ class TaskRunner(object):
             self.__run()
         except Exception as ex:
             self.__diag(str(ex))
+        self.__debug("Worker finished")
 
 
     def result(self):
@@ -230,6 +243,6 @@ if __name__ == "__main__":
 
 
 
-    runner = TaskRunner(test, participants, a, z, debug=True)
+    runner = TaskRunner(test, participants, a, z)
     result = runner.result()
     print pscheduler.json_dump(result, pretty=True)
