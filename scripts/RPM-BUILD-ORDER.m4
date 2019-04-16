@@ -21,4 +21,4 @@ dnl
 
 pshooter-rpm
 pshooter-account
-#pshooter
+pshooter-server

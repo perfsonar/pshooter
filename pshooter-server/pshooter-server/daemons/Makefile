@@ -6,6 +6,7 @@
 #   COMMANDDIR - Location for installed programs
 #   DAEMONDIR - Where daemon programs should be installed
 #   DSNFILE - Location of DSN file for database logins
+#   AUTHFILE - Location of pScheuler proxy auth file
 #   UNITDIR - Location for installed systemd units
 #   PGPASSFILE - Path to PostgreSQL password file
 #   PGSERVICE - Name of the PostgreSQL systemd service
@@ -19,7 +20,6 @@
 BINS=pshooter
 COMMANDS=debug internal
 DAEMONS=service
-
 
 UNITS=$(DAEMONS:%=service-%)
 
@@ -90,6 +90,10 @@ ifndef DSNFILE
 	@echo No DSNFILE specified for build
 	@false
 endif
+ifndef AUTHFILE
+	@echo No AUTHFILE specified for build
+	@false
+endif
 ifndef LOGDIR
 	@echo No LOGDIR specified for build
 	@false
@@ -114,6 +118,7 @@ endif
 		-e 's|__CONFIGDIR__|$(CONFIGDIR)|g' \
 		-e 's|__DAEMONDIR__|$(DAEMONDIR)|g' \
 		-e 's|__DSN__|$(DSNFILE)|g' \
+		-e 's|__AUTH__|$(AUTHFILE)|g' \
 		-e 's|__PROG__|$(@:service-%=%)|g' \
 		-e 's|__PSUSER__|$(PSUSER)|g' \
 		-e 's|__RUNDIR__|$(RUNDIR)|g' \
@@ -140,7 +145,7 @@ TO_CLEAN += $(CONFIGS)
 
 
 build: $(DAEMONS) $(INITS) $(UNITS) $(CONFIGS) $(COMMANDS) $(BINS)
-	@true
+	python -m compileall .
 
 
 
@@ -161,6 +166,10 @@ ifndef DAEMONDIR
 	@echo No DAEMONDIR specified for installation
 	@false
 endif
+ifndef AUTHFILE
+	@echo No AUTHFILE specified for installation
+	@false
+endif
 	mkdir -p $(BINDIR)
 	cp -f $(BINS) $(BINDIR)
 	chmod 555 $(BINS:%=$(BINDIR)/%)
@@ -173,6 +182,11 @@ endif
 	mkdir -p $(DAEMONDIR)
 	cp -f $(DAEMONS) $(DAEMONDIR)
 	chmod 555 $(DAEMONS:%=$(DAEMONDIR)/%)
+	cp -f *.pyc $(DAEMONDIR)
+	chmod 555 $(DAEMONDIR)/*.pyc
+	mkdir -p $(shell dirname $(AUTHFILE))
+	cp auth $(AUTHFILE)
+	chmod 400 $(AUTHFILE)
 ifdef UNITDIR
 	mkdir -p $(UNITDIR)
 	@for SCRIPT in $(DAEMONS) ; \
@@ -182,7 +196,8 @@ ifdef UNITDIR
 		chmod 444 $(UNITDIR)/pshooter-$${SCRIPT}.service ; \
 	done
 endif
+TO_CLEAN += *.pyc
 
 
 clean:
-	rm -rf $(TO_CLEAN) *.pyc *~
+	rm -rf $(TO_CLEAN) *~

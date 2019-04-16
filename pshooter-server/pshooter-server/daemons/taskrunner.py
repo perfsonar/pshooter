@@ -37,7 +37,10 @@ class TaskRunner(object):
             a,
             z,
             log,
-            task
+            task,
+            requester,
+            auth_name,
+            auth_key
             ):
         """
         Construct a task runner
@@ -89,8 +92,14 @@ class TaskRunner(object):
         self.__debug("Posting task %s -> %s" % (a_end, z_end))
         task_post = pscheduler.api_url(host=a_end, path="/tasks")
 
+        requester_header = "%s;%s;%s" % (requester, auth_name, auth_key)
+        
+
         status, task_url = pscheduler.url_post(task_post,
                                                data=pscheduler.json_dump(task),
+                                               headers={
+                                                   "X-pScheduler-Requester": requester_header
+                                               },
                                                throw=False)
         if status != 200:
             self.__diag("Task: %s" % (self.task))

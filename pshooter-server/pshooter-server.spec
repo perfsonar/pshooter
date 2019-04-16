@@ -75,6 +75,9 @@ BuildRequires:	systemd
 The pShooter server
 
 
+
+%define server_conf_dir %{_pshooter_sysconfdir}
+
 # Database
 
 %define pgsql_service postgresql-%{_pshooter_postgresql_version}
@@ -91,12 +94,11 @@ The pShooter server
 
 # Daemons
 %define log_dir %{_var}/log/pshooter
+%define auth_file %{server_conf_dir}/auth
 
 # API Server
 %define httpd_conf_d   %{_sysconfdir}/httpd/conf.d
 %define api_httpd_conf %{httpd_conf_d}/pshooter-api-server.conf
-
-%define server_conf_dir %{_pshooter_sysconfdir}
 
 # Note that we want this here because it seems to work well without
 # assistance on systems where selinux is enabled.  Anywhere else and
@@ -141,6 +143,7 @@ make -C daemons \
      DAEMONDIR=%{_pshooter_daemons} \
      INTERNALSDIR=%{_pshooter_internals} \
      DSNFILE=%{dsn_file} \
+     AUTHFILE=%{auth_file} \
      LOGDIR=%{log_dir} \
      PGDATABASE=%{database_name} \
      PGPASSFILE=%{_pshooter_database_pgpass_file} \
@@ -216,6 +219,7 @@ make -C daemons \
      DAEMONDIR=$RPM_BUILD_ROOT/%{_pshooter_daemons} \
      COMMANDDIR=$RPM_BUILD_ROOT/%{_pshooter_commands} \
      COMMANDSINSTALLED=%{_pshooter_commands} \
+     AUTHFILE=$RPM_BUILD_ROOT/%{auth_file} \
      install
 
 mkdir -p $RPM_BUILD_ROOT/%{log_dir}
@@ -277,42 +281,7 @@ fi
 # Database
 #
 
-# Increase the number of connections to something substantial
-
-%define pgsql_max_connections 500
-
-# Note that this must be dropped in at the end so it overrides
-# anything else in the file.
-drop-in -n %{name} - "%{pg_data}/postgresql.conf" <<EOF
-#
-# pshooter
-#
-max_connections = %{pgsql_max_connections}
-EOF
-
-
-%if 0%{?el7}
-systemctl enable "%{pgsql_service}"
-systemctl start "%{pgsql_service}"
-%endif
-
-# Restart the server only if the current maximum connections is less
-# than what we just installed.  This is more for development
-# convenience than anything else since regular releases don't happen
-# often.
-
-SERVER_MAX=$( (echo "\\t" && echo "\\a" && echo "show max_connections") \
-    | postgresql-load)
-
-if [ "${SERVER_MAX}" -lt "%{pgsql_max_connections}" ]
-then
-%if 0%{?el7}
-    systemctl restart "%{pgsql_service}"
-%endif
-fi
-
-
-
+# Nothing.
 
 # Load the database
 
@@ -374,6 +343,18 @@ EOF
 #
 # Daemons
 #
+
+# Set up a requester key with pScheduler
+
+if [ "$1" = "1" ]
+then
+    PASSWORD=$(random-string --length 64 --safe)
+    echo "%{name}:${PASSWORD}" > "%{auth_file}"
+    chmod 400 "%{auth_file}"
+    awk -F: '{ print $2 }' "%{auth_file}" \
+        | pscheduler internal key add requester "%{name}"
+fi
+
 %if 0%{?el7}
 systemctl daemon-reload
 %endif
@@ -491,6 +472,10 @@ if [ "$1" = "0" ]; then
     # Daemons
     #
     # (Nothing)
+
+    # Unregister with pScheduler
+    pscheduler internal key delete requester "%{name}"
+
 %if 0%{?el7}
     systemctl daemon-reload
 %endif
@@ -545,6 +530,7 @@ systemctl start httpd
 %license LICENSE
 %attr(755,%{_pshooter_user},%{_pshooter_group})%verify(user group mode) %{daemon_config_dir}
 %attr(600,%{_pshooter_user},%{_pshooter_group})%verify(user group mode) %config(noreplace) %{daemon_config_dir}/*
+%attr(400,%{_pshooter_user},%{_pshooter_group})%verify(user group mode) %{auth_file}
 %{_bindir}/*
 %if 0%{?el7}
 %{_unitdir}/*

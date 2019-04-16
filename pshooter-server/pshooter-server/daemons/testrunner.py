@@ -163,13 +163,13 @@ def _resolve_pscheduler_node(args):
 
 
 
-def run_test( data, resolver, log, task):
+def run_test(data, resolver, log, task, requester, auth_name, auth_password):
 
     # Identify pScheduler nodes for all hops
 
-    self.hops = data["path"]
+    hops = data["path"]
 
-    if len(self.hops) < 2:
+    if len(hops) < 2:
         raise ValueError("Path must have at least two hops.")
 
     args = [ (host, resolver, False) for host in hops ]
@@ -255,7 +255,8 @@ def run_test( data, resolver, log, task):
         runners.append(TaskRunner(data["test"],
                                   participants["participants"],
                                   a, z,
-                                  log, task))
+                                  log, task, requester,
+                                  auth_name, auth_password))
         log.debug("%s: Started task to %s", task, z["host"])
 
     results = []

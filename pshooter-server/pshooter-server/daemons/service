@@ -43,6 +43,10 @@ opt_parser.add_option("--dsn",
                       help="Database connection string",
                       action="store", type="string", dest="dsn",
                       default="")
+opt_parser.add_option("--auth",
+                      help="Colon-separated pScheduler authorization key and password",
+                      action="store", type="string", dest="auth",
+                      default=":")
 opt_parser.add_option("--max-parallel",
                       help="Maximum concurrent tasks",
                       action="store", type="int", dest="max_parallel",
@@ -83,6 +87,15 @@ log = pscheduler.Log(
     debug=options.debug,
     facility=pscheduler.local5
 )
+
+auth = pscheduler.string_from_file(options.auth)
+
+try:
+    auth_name, auth_password = auth.split(":")
+except ValueError:
+    log.error("Invalid pScheduler authorization data")
+    pscheduler.fail("Invalid pScheduler authorization data")
+    
 
 dsn = pscheduler.string_from_file(options.dsn)
 
@@ -216,13 +229,15 @@ class DatabaseUpdater(object):
 
 class TaskWorker(object):
 
-    def __init__(self, task, spec, hints, log, updater):
+    def __init__(self, task, spec, hints, log, updater, auth_name, auth_password):
 
         self.task = task
         self.spec = spec
         self.hints = hints
         self.log = log
         self.updater = updater
+        self.auth_name = auth_name
+        self.auth_password = auth_password
 
         self.diags = []
 
@@ -238,6 +253,7 @@ class TaskWorker(object):
 
     def _trace(self):
         self.log.debug("%d: Starting trace to %s", self.task, self.spec["path"])
+        self.log.debug("%d: Requester is %s", self.hints["requester"])
 
         runner = TaskRunner(
             # Task
@@ -253,14 +269,19 @@ class TaskWorker(object):
             # A and Z ends
             { "pscheduler": "localhost", "host": "localhost" },
             { "pscheduler": "localhost", "host": self.spec["path"] },
-            debug=True
+            self.log,
+            self.task,
+            self.hints["requester"],
+            # Authorization
+            self.auth_name,
+            self.auth_password
         )
 
         trace_result = runner.result()
         try:
             result = trace_result["results"]["application/json"]
         except KeyError:
-            self.diags.append("Trace failed:  No result")
+            self.diags.append("Trace failed: %s" % ( "; ".join(trace_result["diags"])))
             return None
         self.log.debug("%d: Trace complete" % (self.task))
         self.diags.append("Trace diagnostics:\n  %s"
@@ -334,7 +355,10 @@ class TaskWorker(object):
             },
             resolver,
             self.log,
-            self.task
+            self.task,
+            self.hints["requester"],
+            auth_name,
+            auth_password
         )
 
         self.diags.append("Finished")
@@ -520,7 +544,7 @@ def main_program():
 
                 task, spec, hints, added = row
                 log.debug("Starting %d, added %s", task, added)
-                worker = TaskWorker(task, spec, hints, log, updater)
+                worker = TaskWorker(task, spec, hints, log, updater, auth_name, auth_password)
                 workers.append(worker)
                 ids.append(task)
 
