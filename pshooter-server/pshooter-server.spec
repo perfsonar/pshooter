@@ -43,7 +43,6 @@ Requires:	python-flask
 
 # TODO: Do we need these?
 Requires:	python-ipaddr
-Requires:	python-requests
 Requires:	python-jsontemplate
 
 # API Server
@@ -59,7 +58,6 @@ Requires:	pshooter-server
 Requires:	mod_ssl
 Requires:	mod_wsgi
 Requires:	python-pscheduler >= 1.3.1.3
-Requires:	python-requests
 Requires:	pytz
 
 
