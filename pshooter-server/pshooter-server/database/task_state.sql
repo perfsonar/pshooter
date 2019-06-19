@@ -202,6 +202,7 @@ ON CONFLICT (id) DO UPDATE
 SET
     display = EXCLUDED.display,
     enum = EXCLUDED.enum,
+    running = EXCLUDED.running,
     finished = EXCLUDED.finished;
 ALTER TABLE task_state ENABLE TRIGGER task_state_alter;
 
