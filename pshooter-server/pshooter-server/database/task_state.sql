@@ -99,7 +99,7 @@ BEGIN
 	RETURN 2;
 END;
 $$ LANGUAGE plpgsql;
-ALTER FUNCTION task_state_pending() IMMUTABLE;
+ALTER FUNCTION task_state_prep() IMMUTABLE;
 
 
 -- Initial traceroute is being done (optional step_
