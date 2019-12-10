@@ -31,29 +31,6 @@ def request_hints():
 
 
 
-
-
-# TODO: This is pScheduler code.  Get rid of it.
-def task_requester_key(task_uuid):
-    """
-    Get the requester and key for a task from its hints.
-
-    Return None if the task doesn't exist or has no requester hint.
-    """
-
-    with dbcursor_query(
-        "SELECT hints, json ->> '_key' FROM task WHERE uuid = %s", [task_uuid]
-    ) as cursor:
-        if cursor.rowcount == 0:
-            return (None, None)
-        elif cursor.rowcount > 1:
-            raise Exception("Didn't get expected single row")
-        (hints, key) = cursor.fetchone()
-
-    return (hints.get("requester", None), key)
-
-
-
 #
 # Hostnames
 #

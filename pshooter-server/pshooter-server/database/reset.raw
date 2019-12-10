@@ -32,10 +32,6 @@ EOF
 fi
 
 
-# TODO: When we make databases remotable, this will need to pull
-# information from the DSN file.
-
-
 # Tear down the existing database
 postgresql-load '__DATADIR__/database-teardown.sql'
 
@@ -61,9 +57,6 @@ fi
 
 # If the ticker is running, it will restart and do this, but in case
 # it isn't, make sure everything is in order.
-#
-# TODO: This will have to be a separate program once the database
-# remotable.
 
 postgresql-load --role '__ROLE__' <<EOF
 \c __DATABASE__

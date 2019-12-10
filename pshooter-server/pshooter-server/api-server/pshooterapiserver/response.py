@@ -12,7 +12,7 @@ from .args import arg_boolean
 from .log import log
 
 
-# TODO: Duplicative, but easier than the cross-module imports. :-@
+# Duplicative, but easier than the cross-module imports. :-@
 def response_json_dump(dump, sanitize=True):
     if sanitize:
         sanitized = pscheduler.json_decomment(dump, prefix="_", null=True)
