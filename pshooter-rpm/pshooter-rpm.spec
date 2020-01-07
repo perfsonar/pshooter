@@ -3,8 +3,8 @@
 #
 
 Name:		pshooter-rpm
-Version:	1.0
-Release:	%{version}%{?dist}
+Version:	0.1.0
+Release:	%{?dist}
 
 Summary:	Macros for use by pshooter RPM specs
 BuildArch:	noarch

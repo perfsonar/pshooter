@@ -3,8 +3,8 @@
 #
 
 Name:		pshooter-account
-Version:	1.0
-Release:	%{version}%{?dist}
+Version:	0.1.0
+Release:	%{?dist}
 
 Summary:	Account for pshooter
 BuildArch:	noarch

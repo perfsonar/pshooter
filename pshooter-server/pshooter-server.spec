@@ -3,8 +3,8 @@
 #
 
 Name:		pshooter-server
-Version:	1.1
-Release:	0.2.b1%{?dist}
+Version:	0.1.0
+Release:	%{?dist}
 
 Summary:	pShooter Server
 BuildArch:	noarch
