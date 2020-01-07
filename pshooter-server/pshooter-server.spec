@@ -2,10 +2,6 @@
 # RPM Spec for pShooter Server
 #
 
-# TODO: Need to write proper systemd services for this package and
-# make the scriptlets use them on CentOS 7.  For now the old-style
-# init scripts function just fine.
-
 Name:		pshooter-server
 Version:	1.1
 Release:	0.2.b1%{?dist}
@@ -40,10 +36,6 @@ Requires:	curl
 Requires:	pshooter-account
 Requires:	python-daemon
 Requires:	python-flask
-
-# TODO: Do we need these?
-Requires:	python-ipaddr
-Requires:	python-jsontemplate
 
 # API Server
 BuildRequires:	pshooter-account
@@ -283,7 +275,7 @@ fi
 
 # Load the database
 
-# TODO: Note that if this fails, the scriptlet stops but RPM doesn't
+# Note that if this fails, the scriptlet stops but RPM doesn't
 # exit zero.  This is apparently not getting fixed.
 #
 # Discussion:
@@ -478,20 +470,9 @@ if [ "$1" = "0" ]; then
     systemctl daemon-reload
 %endif
 
-
-
-    #
-    # API Server
-    #
-    # TODO: Determine if we want to shut this off, as other services might
-    # be using it.
-    # if selinuxenabled
-    # then
-    #     echo "Setting SELinux permissions (may take awhile)"
-    #     setsebool -P httpd_can_network_connect_db 1
-    # fi
 else
-    #we're doing an update so restart services
+
+    # We're doing an update so restart services
     for SERVICE in service
     do
         NAME="pshooter-${SERVICE}"
