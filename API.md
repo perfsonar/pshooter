@@ -188,35 +188,88 @@ shown above to read:
 ```
 
 
+### `/tasks`_UUID_ - Individual Tasks
+
+| Operation | Description |
+|:----------|:----------- |
+| `GET`     | Returns the task in its current state as a JSON object.  See _[Retrieved Task Format](#retrieved-task-format)_
+for details on the contents of the object. |
+| `PUT`     | _Not Supported_ |
+| `POST`    | _Not Supported_ |
+| `DELETE`  | _(Future Feature)_ Cancels cancels the task if it is still pending and the request was received from the local host or the same one that originally `POST`ed it. |
 
 
+#### Retreived Task Format
+
+The retrieved task is a JSON object containing the following pairs:
+
+ * diags (String) - Diagnostic information about the completion of the
+   task.
+
+ * `eta` (String) - The estimated time of arrival (completion) for the
+   task as an ISO 8601 timestamp.  If no time has been estimated, the
+   value will be `null`.
+
+ * `hints` (Object) - Information about the initial request for the
+   task, containing the following:
+    * `requester` (String) - The IP address of the host requesting the
+      task.
+    * `server` (String) - The IP address on the server where the
+      request arrived.
+
+ * `href` (String) - The URL for this object.
+
+ * `path` (Array of Strings) - A list of the addresses of the hops
+   along the path.
+
+ * `result` (Array of Objects) - Results of each measurement from the
+   first point to each hop in the path that was able to be measured.
+   Each result is an object containing the following:
+
+    * `diags` (Array of Strings) - Diagnostic messages from pShooter
+      about the test result.  This will usually be empty for
+      successful measurements.
+
+    * `hosts` (Object) - Information about the test endpoints, named
+      `a` and `z`.  Each pair is an object containing the following:
+      * `diags` (String) - Diagnostic information about how the host's
+        status as a pScheduler node was discovered.
+
+      * `host` (String) - The host's IP address
+
+      * `pscheduler` (String) - If present, the address of the
+        pScheduler node that was used.
+
+      * `schema` (Number) - The version of the host data.  Assume `1` if not
+        provided.
+
+    * `href` (String) - The URL of the pScheduler run that made the
+      measurement.
+
+    * `participants` (Array of String) - The pScheduler nodes that
+      participated in the measurement.
+
+    * `result` (Object) - The result of the measurement in all formats
+      pScheduler can provide.  Supplied keys are `application/json`
+      for the raw JSON result, `text/html` for HTML and `text/plain`
+      for plain text.
 
 
+ * `spec` (Object) - The specification provided when the task was
+   created.  Like pScheduler, pShooter will replace any pair beginning
+   with an underscore with `null` to protect potentially-sensitive
+   information.
 
+ * `state` (String) - The current state of the task.  This will be one
+   of the following values:
 
+    * `pending` - The task has not yet started.
+    * `prep` - The task is being prepared to run.
+    * `trace` - A trace is being performed.
+    * `running` - Measurements are being made.
+    * `callback` - The callback, if one was supplied, is being executed.
+    * `finished` - The task has been completed.
+    * `failed` - The task failed.
+    * `canceled` - The task was canceled before it started.
 
-
-
-
-
-
-------------------------------------------------------------
-OLD
-------------------------------------------------------------
-
-
-
-`/tasks/`_UUID_ - `GET` returns the task in its current state as a
-JSON object.  See _[Retrieved Task Format](#retrieved-task-format)_
-for details on the contents of the object.  Once implemented, `DELETE`
-cancels the task if it is still pending and the request was received
-from the local host or the same one that originally `POST`ed it.
-
-
-
-
-
-
-## Retreived Task Format
-
-**TODO: Write this**
+ * `state-display` (String) - Like `state` but in a format suitable for display for humans
