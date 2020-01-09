@@ -83,7 +83,7 @@ For example:
 ### Locator Records
 
 Location information is provided by a specially-formatted `TXT` record
-(described in [_Record Format_](#Record_Format), below).  Each `TXT`
+(described in [_Record Format_](#Record-Format), below).  Each `TXT`
 record is assigned to a FQDN derived from that named by the `PTR`
 record for the interface's IP address.  The derived name is used
 rather than the name in the `PTR` record to avoid collisions with
