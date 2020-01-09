@@ -3,11 +3,10 @@
 
 ## Introduction and General Information
 
-This document describes the REST API used to submit tasks to
-pSshooter, check their status and retrieve the results.
-
-HTTPS is the only protocol supported.  Requests made using HTTP will
-be rejected.
+This document describes the
+[REST](https://en.wikipedia.org/wiki/Representational_state_transfer)
+API used to submit tasks to pSshooter, check their status and retrieve
+the results.
 
 With exceptions pointed out below, all data in and out of the API is
 [JavaScript Object Notation](https://www,json.org) (JSON).
@@ -15,10 +14,16 @@ With exceptions pointed out below, all data in and out of the API is
 Clients should be prepared to handle being redirected to alternate
 locations by the `300` family of HTTP status codes.
 
+HTTPS is the only protocol supported.  Requests made using HTTP will
+be rejected.
 
 
 
-## Adminstrative endpoints
+
+
+
+
+## Endpoints
 
 ### `/` - The Root
 
@@ -161,22 +166,46 @@ shown above to read:
 **TODO: Write this**
 
 
-##### The Callback
+##### `callback` - The Callback
 
-**TODO: Write this**
+If provided, the `callback` directs pShooter to retrieve a URL using
+the `GET` method as a way to asynchronously signal that a task has
+been completed.  The callback object contains the following pairs:
 
+ * `_href` (String) - The URL to be retrieved.
+
+ * `_params` (Object) - Parameters to be added to the URL as a query
+   string.  The value in each pair may be any JSON, but it will be
+   converted to a string prior to submission to the server.
+
+ * `_headers` (Object) - Headeds to be added to the request.  The
+   value in each pair is a string.
+
+ * `retry-policy` (Array of Objects) - A list describing how to
+   attempt retries of the callback should the first one fail.  If not
+   provided, pShooter will make one attempt to execute the callback
+   before giving up.  Each item in the list is an object containing
+   the following:
+
+   * `attempts` (Integer) - The number of times this part of the
+     policy is applied.
+
+   * `wait` (String) - The amount of time to wait between attempts asn
+     an ISO 8601 duration.
+
+
+For example:
 ```
     ...
     "callback": {
         "_href": "https://nms.example.net/callback",
         "_params": {
-            "id": "572034",
-            "auth": "70487ec5-666e-46f0-91ea-dfeedf5bd24f"
+            "id": "281apple",
+            "auth": "oicu812"
         },
         "_headers": {
-            "#X!Bad!Header": "bad",
-            "X-Fake-Parameter": "gobsmacked",
-            "X-Faker-Parameter": "gobsmackeder"
+            "X-Department": "Performing Arts",
+            "X-Campus": "east"
         },
         "retry-policy": [
             {"attempts": 2, "wait": "PT5S"},
