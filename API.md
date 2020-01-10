@@ -163,7 +163,84 @@ shown above to read:
 
 ##### `dns` - Augmentation of DNS
 
-**TODO: Write this**
+If provided, the `dns` object defines additional data for the
+[DNS-based scheme](DNS.md) used to identify the nearest pScheduler
+node associated with an address.  Augmenting DNS allows allows for
+intelligence about networks not participating in the DNS scheme to be
+added to the process.  This data is searched prior to DNS, giving it
+priority.
+
+The object is a tree starting at the root of DNS and broken down by
+labels in the FQDN being resolved.  Like DNS zones, items at any level
+in the tree can represent single or multiple labels, so
+`gw1.dca.example.net` could be at the top of the tree in its entirety
+or split across multiple levels by label (e.g., `gw1` under `dca`
+under `example.net`).
+
+Here are three examples, all equivalent:
+
+```
+...
+# Full FQDNs at the top of the tree
+
+"dns": {
+  "17.2.0.192.in-addr.arpa" {
+    "PTR": "gw1.dca.example.net"
+   },
+  "_ipv4._perfsonar.gw1.dca.example.net": {
+    "TXT": "{ \"pscheduler\": \"ps.dca.example.net\" }"
+  }
+}
+...
+```
+
+```
+...
+# Split across multiple labels
+
+"dns": {
+  "in-addr.arpa": {
+    "17.2.0.192" { "PTR": "gw1.dca.example.net" }
+  },
+  "example.net": {
+    "_ipv4._perfsonar.gw1.dca": {
+      "TXT": "{ \"pscheduler\": \"ps.dca.example.net\" }"
+  }
+}
+...
+```
+
+```
+...
+# Broken down by individual labels
+
+"dns": {
+  "arpa": {
+    "in-addr": {
+      "192": {
+        "0": {
+          "2": {
+            "17": {
+              "PTR": "gw1.dca.example.net"
+            }
+          }
+        }
+      }
+    }
+  },
+  "net": {
+    "example": {
+      "dca": {
+        "gw1": {
+          "TXT": "{ \"pscheduler\": \"ps.dca.example.net\" }"
+        }
+      }
+    }
+  }
+}
+...
+```
+
 
 
 ##### `callback` - The Callback
