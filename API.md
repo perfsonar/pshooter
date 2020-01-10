@@ -25,6 +25,9 @@ be rejected.
 
 ## Endpoints
 
+All endpoints are relative to `https://HOSTNAME/pshooter`.
+
+
 ### `/` - The Root
 
 | Operation | Description |
