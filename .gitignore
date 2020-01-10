@@ -6,7 +6,8 @@
 *~
 
 # Ignore rpms, logs and other build artifacts
-*.rpm
+# TODO:  Re-add his after beta is over
+#*.rpm
 *.pyc
 *.log
 */rpmbuild

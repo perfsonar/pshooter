@@ -4,7 +4,7 @@
 
 Name:		pshooter-account
 Version:	0.1.0
-Release:	%{?dist}
+Release:	1%{?dist}
 
 Summary:	Account for pshooter
 BuildArch:	noarch
