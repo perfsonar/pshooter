@@ -175,7 +175,9 @@ labels in the FQDN being resolved.  Like DNS zones, items at any level
 in the tree can represent single or multiple labels, so
 `gw1.dca.example.net` could be at the top of the tree in its entirety
 or split across multiple levels by label (e.g., `gw1` under `dca`
-under `example.net`).
+under `example.net`).  One level below the node covering the leftmost
+label are the records for the host, named in uppercase (e.g., `TXT`
+and `PTR`).
 
 Here are three examples, all equivalent:
 
