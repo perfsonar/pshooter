@@ -230,3 +230,25 @@ repeating this step up to five times if a fetched document contains a
 9. Use the value of the `pscheduler` pair in the JSON to construct a
 URL for the pScheduler API on the host:
  * `https://ps6.example.net/pscheduler`
+
+
+## Configuration of Well-Known DNS Services
+
+
+## [BIND](https://www.isc.org/bind)
+
+Add TXT records to the appropriate zone files.  Surround the JSON with
+double quotes and escape all internal double quotes with backslashes:
+
+```
+_perfsonar    TXT     "{ \"schema\": 1, \"pscheduler\": \"ps6.example.net\" }"
+```
+
+
+## BlueCat Address Manager
+
+Create a `TXT` entry and enter the unaltered JSON:
+
+```
+{ "schema": 1, "pscheduler": "ps6.example.net" } 
+```
