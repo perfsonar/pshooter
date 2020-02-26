@@ -247,7 +247,7 @@ _perfsonar    TXT     "{ \"schema\": 1, \"pscheduler\": \"ps6.example.net\" }"
 
 ## BlueCat Address Manager
 
-Create a `TXT` entry and enter the unaltered JSON:
+Create a `TXT` record and enter the unaltered JSON for its value:
 
 ```
 { "schema": 1, "pscheduler": "ps6.example.net" } 
