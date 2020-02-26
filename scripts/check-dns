@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""
+Find the pShooter DNS record for a host.
+
+Exits 0 if a record was found and 1 if not.
+
+NOTE: This is a standalone version of the algorithm used in pShooter
+that doesn't depend on the pScheduler Python library.  It does require
+Python's DNS module (On Red Hat, yum -y install python3-dns).
+"""
+
+import argparse
+import dns.resolver
+import json
+import sys
+
+#
+# Gargle the Arguments
+#
+
+def ip_version(string):
+        value = int(string)
+        if value not in [4, 6]:
+                raise argparse.ArgumentTypeError("IP version must be 4 or 6.")
+        return value
+
+parser = argparse.ArgumentParser()
+
+# Switches
+
+parser.add_argument("--full", "-f",
+                    default=False,
+                    action='store_true',
+                    help="Continue looking after finding a record")
+parser.add_argument("--ip-version", "-i",
+                    type=ip_version,
+                    default=4,
+                    help="IP version (4 or 6)")
+parser.add_argument("--verbose", "-v",
+                    default=False,
+                    action='store_true',
+                    help="Print lots of information")
+
+# Positionals
+
+parser.add_argument("hostname",
+                    type=str,
+                    help="Host name")
+
+opts = parser.parse_args()
+
+host = opts.hostname
+ip_version = opts.ip_version
+
+prefixes = [
+        "_ipv{}._perfsonar".format(ip_version),
+        "_perfsonar"
+]
+
+
+
+def try_record(host):
+    """
+    Do everything for a single DNS record.
+    """
+
+    if opts.verbose: print("{}:".format(host))
+
+    try:
+        resolved = str(dns.resolver.query(host, 'TXT')[0])
+    except dns.resolver.NXDOMAIN as ex:
+        if opts.verbose: print("    Nothing")
+        return False
+
+    try:
+        parsed = json.loads(resolved)
+        # If the TXT record came back as a JSON string, re-parse it
+        if type(parsed) == str:
+            parsed = json.loads(parsed)
+    except json.decoder.JSONDecodeError:
+        if opts.verbose: print("    Warning: TXT record is not JSON")
+        return False
+
+    if type(parsed) != dict:
+        if opts.verbose: print("    Warning: TXT record is not a JSON object")
+        return False
+
+
+    found = False
+
+    # The HREF trumps everything else
+    try:
+        if opts.verbose:
+            print("    Redirects to {}".format(parsed["href"]))
+        else:
+            print(parsed["href"])
+        return True
+    except KeyError:
+        pass
+
+    try:
+        if opts.verbose:
+            print("    pScheduler: {}".format(parsed["pscheduler"]))
+        else:
+            print(parsed["pscheduler"])
+        return True
+    except KeyError:
+        pass
+
+    if opts.verbose: print("    Nothing useful in record; may be invalid.")
+    return False
+
+
+
+def check_hosts(host):
+    """
+    Run through all of the possible DNS FQDNs for a host and return
+    when appropriate.
+    """
+
+    found = False
+
+    while len(host):
+
+        for prefix in prefixes:
+            record = "{}.{}".format(prefix, host)
+            tried = try_record(record)
+            if opts.verbose: print()
+            if tried:
+                found = True
+                if not opts.full:
+                    return True
+
+        # Trim off a label and try again
+        try:
+            index = host.index(".")
+            host = host[index+1:]
+        except ValueError:
+            host = ""
+
+    return found
+
+
+
+if check_hosts(host):
+    sys.exit(0)
+
+if opts.verbose:
+    print("Nothing found.")
+
+sys.exit(1)
