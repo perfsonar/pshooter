@@ -3,7 +3,7 @@
 #
 
 Name:		pshooter-account
-Version:	0.1.0
+Version:	0.1.1
 Release:	1%{?dist}
 
 Summary:	Account for pshooter
