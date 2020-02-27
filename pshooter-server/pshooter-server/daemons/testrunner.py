@@ -45,59 +45,59 @@ def _resolve_from_family(family_record_type, hostname, resolver, api_check):
 
         txt = resolver(ps_fqdn, "TXT")
 
-        # If there's no TXT record, then see if pScheduler is running
-        # on the original host as a last-ditch effort.  This doesn't
-        # do much for most hosts along a route but might help catch
-        # perfSONAR nodes at the very end, enabling two-participant
-        # tests.
+    # If there's no TXT record, then see if pScheduler is running
+    # on the original host as a last-ditch effort.  This doesn't
+    # do much for most hosts along a route but might help catch
+    # perfSONAR nodes at the very end, enabling two-participant
+    # tests.
 
-        if txt is None:
-            return _pscheduler_at(hostname, "No TXT record for %s" % (ps_fqdn))
+    if txt is None:
+        return _pscheduler_at(hostname, "No TXT record for %s" % (ps_fqdn))
 
-        txt_json = None
-        redirects = 0
+    txt_json = None
+    redirects = 0
 
-        while redirects < 5:
+    while redirects < 5:
 
-            try:
-                txt_json = pscheduler.json_load(txt)
-            except ValueError:
-                # If it doesn't look like JSON, do another last-ditch
-                # attempt at the address.
-                return _pscheduler_at(hostname, "TXT record for %s contains invalid JSON" % (ps_fqdn))
+        try:
+            txt_json = pscheduler.json_load(txt)
+        except ValueError:
+            # If it doesn't look like JSON, do another last-ditch
+            # attempt at the address.
+            return _pscheduler_at(hostname, "TXT record for %s contains invalid JSON" % (ps_fqdn))
 
-            if "href" not in txt_json:
-                # No href means we have the final version
-                break
-
-            # Handle a redirect
-
-            redirects += 1
-            try:
-                (status, txt_json) = pscheduler.url_get(txt_json["href"], throw=False)
-            except ValueError:
-                status = 0
-            if status != 200:
-                # Nothing else we can do.
-                return _pscheduler_at(hostname, "Failed to fetch %s: %d: %s" % (txt_json["href"], status, txt_json))
-
+        if "href" not in txt_json:
+            # No href means we have the final version
             break
 
-        if "href" in txt_json:
-            # Too many redirects.  Last-ditch it.
-            return _pscheduler_at(hostname, "Too many redirects for %s" % (ps_fqdn))
+        # Handle a redirect
 
-        txt_json["host"] = hostname
+        redirects += 1
+        try:
+            (status, txt_json) = pscheduler.url_get(txt_json["href"], throw=False)
+        except ValueError:
+            status = 0
+        if status != 200:
+            # Nothing else we can do.
+            return _pscheduler_at(hostname, "Failed to fetch %s: %d: %s" % (txt_json["href"], status, txt_json))
 
-        if api_check and "pscheduler" in txt_json:
+        break
 
-            (has_ps, reason) = pscheduler.api_ping(txt_json["pscheduler"])
-            if has_ps:
-                return txt_json
-            else:
-                return _pscheduler_at(hostname, "%s: %s" % (txt_json["pscheduler"], reason))
+    if "href" in txt_json:
+        # Too many redirects.  Last-ditch it.
+        return _pscheduler_at(hostname, "Too many redirects for %s" % (ps_fqdn))
 
-        return txt_json
+    txt_json["host"] = hostname
+
+    if api_check and "pscheduler" in txt_json:
+
+        (has_ps, reason) = pscheduler.api_ping(txt_json["pscheduler"])
+        if has_ps:
+            return txt_json
+        else:
+            return _pscheduler_at(hostname, "%s: %s" % (txt_json["pscheduler"], reason))
+
+    return txt_json
 
 
 
