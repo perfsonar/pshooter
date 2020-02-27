@@ -3,7 +3,7 @@ Hybrid Static/DNS Resolver
 """
 
 import pscheduler
-
+import shlex
 
 class StaticResolver(object):
     """
@@ -145,7 +145,16 @@ class DNSResolver(object):
         """
         Resolve a DNS record
         """
-        return pscheduler.dns_resolve(host, query=record)
+        resolved = pscheduler.dns_resolve(host, query=record)
+
+        # TXT records get special treatment because they can be
+        # returned in varying states of quotedness.  Shlex will undo
+        # that for all cases and return a proper string.
+        if type(resolved) == str and record.upper() == "TXT":
+            resolved = " ".join(shlex.split(resolved))
+
+        return resolved
+
 
 
 
