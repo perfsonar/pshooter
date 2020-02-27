@@ -12,6 +12,7 @@ Python's DNS module (On Red Hat, yum -y install python3-dns).
 import argparse
 import dns.resolver
 import json
+import shlex
 import sys
 
 #
@@ -23,6 +24,12 @@ def ip_version(string):
         if value not in [4, 6]:
                 raise argparse.ArgumentTypeError("IP version must be 4 or 6.")
         return value
+
+
+resolver = dns.resolver.Resolver()
+def resolver_host(string):
+    resolver.nameservers = [ string ]
+    return string
 
 parser = argparse.ArgumentParser()
 
@@ -36,6 +43,9 @@ parser.add_argument("--ip-version", "-i",
                     type=ip_version,
                     default=4,
                     help="IP version (4 or 6)")
+parser.add_argument("--resolver", "-e",
+                    type=resolver_host,
+                    help="Resolver to use")
 parser.add_argument("--verbose", "-v",
                     default=False,
                     action='store_true',
@@ -58,6 +68,11 @@ prefixes = [
 ]
 
 
+def parse_txt_record(string):
+
+    pass
+
+
 
 def try_record(host):
     """
@@ -67,16 +82,21 @@ def try_record(host):
     if opts.verbose: print("{}:".format(host))
 
     try:
-        resolved = str(dns.resolver.query(host, 'TXT')[0])
-    except dns.resolver.NXDOMAIN as ex:
+        resolved = str(resolver.query(host, 'TXT')[0])
+    except dns.resolver.NXDOMAIN:
         if opts.verbose: print("    Nothing")
         return False
+    except dns.exception.Timeout:
+        if opts.verbose: print("    Timed out")
+        return False
+    except Exception as ex:
+        if opts.verbose: print("    Error:", str(ex))
+        return False
+
+    dequoted = " ".join(shlex.split(resolved))
 
     try:
-        parsed = json.loads(resolved)
-        # If the TXT record came back as a JSON string, re-parse it
-        if type(parsed) == str:
-            parsed = json.loads(parsed)
+        parsed = json.loads(dequoted)
     except json.decoder.JSONDecodeError:
         if opts.verbose: print("    Warning: TXT record is not JSON")
         return False
